@@ -1,4 +1,3 @@
-```md
 # Git Commit Convention
 
 This project follows a **simple, strict commit message convention** to keep the Git history clean, readable, and hackathon-friendly.

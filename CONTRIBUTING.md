@@ -179,16 +179,3 @@ fix(editor): resolve cursor jump issue
 docs: add setup and architecture guide
 
 ```
-
----
-
-## Summary
-
-This convention helps:
-- Keep commit history clean
-- Make reviews and debugging easier
-- Impress judges and collaborators
-- Scale smoothly beyond the hackathon
-
-Stick to it 
-```

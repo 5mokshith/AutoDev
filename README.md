@@ -1,4 +1,3 @@
-```md
 # AutoDev 🚀  
 **An AI-powered autonomous code editor that turns ideas into running applications — directly in the browser.**
 

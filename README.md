@@ -1,9 +1,9 @@
-# AutoDev 🚀  
+# AutoDev   
 **An AI-powered autonomous code editor that turns ideas into running applications — directly in the browser.**
 
 ---
 
-## 📌 Overview
+##  Overview
 
 **AutoDev** is a next-generation AI code editor inspired by tools like Cursor, designed to **generate, modify, and run full applications from plain English prompts**.
 
@@ -17,7 +17,7 @@ AutoDev is built with **hackathon-grade speed** and **production-grade architect
 
 ---
 
-## 🎯 Problem Statement
+##  Problem Statement
 
 Modern developers spend significant time on:
 - Bootstrapping projects  
@@ -33,7 +33,7 @@ Modern developers spend significant time on:
 
 ---
 
-## 🧠 Core Concept
+##  Core Concept
 
 > **Prompt → Project → Preview → Iterate → Push**
 
@@ -41,9 +41,9 @@ AutoDev enables developers to describe what they want to build, watch the projec
 
 ---
 
-## 🏗️ System Architecture
+##  System Architecture
 
-### 🔹 High-Level Architecture
+###  High-Level Architecture
 
 ```
 
@@ -70,9 +70,9 @@ Client (Browser)
 
 ---
 
-## 🧩 Technology Stack
+##  Technology Stack
 
-### 🖥️ Frontend
+###  Frontend
 - **Next.js + TypeScript**  
   Foundation for UI, API routes, and app routing
 
@@ -91,7 +91,7 @@ Client (Browser)
 
 ---
 
-### 🔐 Authentication
+###  Authentication
 - **Clerk**
   - Secure OAuth authentication
   - GitHub sign-in support
@@ -99,7 +99,7 @@ Client (Browser)
 
 ---
 
-### 🗄️ Database & Realtime Sync
+###  Database & Realtime Sync
 - **Convex**
   - Realtime database and sync engine
   - No polling, instant updates
@@ -111,7 +111,7 @@ Client (Browser)
 
 ---
 
-### 🤖 AI & Background Processing
+###  AI & Background Processing
 - **Inngest**
   - Orchestrates AI agents
   - Handles:
@@ -123,7 +123,7 @@ Client (Browser)
 
 ---
 
-### 🌐 Web Crawling & Context Ingestion
+###  Web Crawling & Context Ingestion
 - **Crawl4AI (Dockerized)**
   - Open-source web crawler
   - Runs as a **separate Docker service**
@@ -135,7 +135,7 @@ Client (Browser)
 
 ---
 
-### 🧪 Code Execution
+###  Code Execution
 - **WebContainers**
   - Runs Node.js projects fully inside the browser
   - Enables:
@@ -145,7 +145,7 @@ Client (Browser)
 
 ---
 
-### 🔗 GitHub Integration
+###  GitHub Integration
 - GitHub OAuth (via Clerk)
 - Features:
   - Clone existing repositories
@@ -155,9 +155,9 @@ Client (Browser)
 
 ---
 
-## ✨ Key Features
+##  Key Features
 
-### 🔹 AI-Driven Project Generation
+###  AI-Driven Project Generation
 - Describe your app in plain English
 - AutoDev:
   - Creates folder structure
@@ -167,7 +167,7 @@ Client (Browser)
 
 ---
 
-### 🔹 Autonomous File Editing Agent
+###  Autonomous File Editing Agent
 - AI can:
   - Create new files
   - Modify existing code
@@ -178,7 +178,7 @@ Client (Browser)
 
 ---
 
-### 🔹 Live In-Editor Preview
+###  Live In-Editor Preview
 - Applications run directly inside AutoDev
 - No tab switching
 - Full access to:
@@ -188,7 +188,7 @@ Client (Browser)
 
 ---
 
-### 🔹 Ghost Text AI Suggestions
+###  Ghost Text AI Suggestions
 - Context-aware inline suggestions
 - Appear as faded “ghost text”
 - Press **Tab** to accept
@@ -199,7 +199,7 @@ Client (Browser)
 
 ---
 
-### 🔹 Documentation & URL Ingestion
+###  Documentation & URL Ingestion
 - Paste any documentation URL
 - Crawl4AI:
   - Scrapes and cleans content
@@ -208,7 +208,7 @@ Client (Browser)
 
 ---
 
-### 🔹 GitHub Export
+###  GitHub Export
 - One-click push to GitHub
 - Supports:
   - New repositories
@@ -220,7 +220,7 @@ Client (Browser)
 
 ---
 
-## 🔁 Execution Flow
+##  Execution Flow
 
 1. User logs in via GitHub (Clerk)
 2. User describes the project
@@ -233,7 +233,7 @@ Client (Browser)
 
 ---
 
-## 🔒 Security & Reliability
+##  Security & Reliability
 - OAuth-based authentication
 - Tokens stored securely
 - Background jobs isolated from UI
@@ -241,18 +241,17 @@ Client (Browser)
 
 ---
 
-## 🧠 Why AutoDev?
+##  Why AutoDev?
 
-- ⚡ Zero setup
-- 🤖 Autonomous AI agents
-- 🧩 Modular architecture
-- 🧪 Runs entirely in the browser
-- 🧠 Open-source-first mindset
-- 🚀 Hackathon-ready, startup-scalable
+-  Zero setup
+-  Autonomous AI agents
+-  Modular architecture
+-  Runs entirely in the browser
+-  Open-source-first mindset
 
 ---
 
-## 📈 Future Enhancements
+##  Future Enhancements
 - Collaborative editing
 - Multi-agent workflows
 - Versioned AI changes
@@ -261,7 +260,7 @@ Client (Browser)
 
 ---
 
-## 🏁 Conclusion
+##  Conclusion
 
 **AutoDev** reimagines the developer experience by collapsing idea, code, execution, and iteration into a single intelligent interface.
 

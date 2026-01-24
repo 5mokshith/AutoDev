@@ -28,20 +28,15 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider
-      frontendApi={process.env.NEXT_PUBLIC_CLERK_FRONTEND_API}
       appearance={{
-        theme: {
-          colors: {
-            primary: "#6c47ff",
-            backgroundSecondary: "#1f1f1f",
-            textSecondary: "#f5f5f5",
-            textPrimary: "#f5f5f5",
-            error: "#ff0000",
-          },
-          fonts: {
-            body: "Inter, sans-serif",
-            heading: "IBM Plex Mono, monospace",
-          },
+        baseTheme: dark,
+        variables: {
+          colorPrimary: "#6c47ff",
+          colorBackground: "#1f1f1f",
+          colorText: "#f5f5f5",
+          colorTextSecondary: "#f5f5f5",
+          colorDanger: "#ff0000",
+          fontFamily: "Inter, sans-serif",
         },
       }}
     >

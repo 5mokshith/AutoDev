@@ -38,7 +38,7 @@ import {
   useMessages,
 } from "../hooks/use-conversations";
 
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
 
@@ -70,7 +70,7 @@ export const ConversationSidebar = ({
 
   // Check if any message is currently processing
   const isProcessing = conversationMessages?.some(
-    (msg) => msg.status === "processing"
+    (msg: Doc<"messages">) => msg.status === "processing"
   );
 
   const handleCancel = async () => {

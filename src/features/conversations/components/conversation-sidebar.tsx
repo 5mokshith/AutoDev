@@ -161,7 +161,7 @@ export const ConversationSidebar = ({
         </div>
         <Conversation className="flex-1">
           <ConversationContent>
-            {conversationMessages?.map((message, messageIndex) => (
+            {conversationMessages?.map((message: Doc<"messages">, messageIndex) => (
               <Message
                 key={message._id}
                 from={message.role}

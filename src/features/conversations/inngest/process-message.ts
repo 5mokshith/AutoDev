@@ -37,7 +37,7 @@ export const processMessage = inngest.createFunction(
     ],
     onFailure: async ({ event, step }) => {
       const { messageId } = event.data.event.data as MessageEvent;
-      const internalKey = process.env.POLARIS_CONVEX_INTERNAL_KEY;
+      const internalKey = process.env.AutoDev_CONVEX_INTERNAL_KEY;
 
       // Update the message with error content
       if (internalKey) {
@@ -63,10 +63,10 @@ export const processMessage = inngest.createFunction(
       message
     } = event.data as MessageEvent;
 
-    const internalKey = process.env.POLARIS_CONVEX_INTERNAL_KEY; 
+    const internalKey = process.env.AutoDev_CONVEX_INTERNAL_KEY; 
 
     if (!internalKey) {
-      throw new NonRetriableError("POLARIS_CONVEX_INTERNAL_KEY is not configured");
+      throw new NonRetriableError("AutoDev_CONVEX_INTERNAL_KEY is not configured");
     }
 
     // TODO: Check if this is needed
@@ -152,7 +152,7 @@ export const processMessage = inngest.createFunction(
 
     // Create the coding agent with file tools
     const codingAgent = createAgent({
-      name: "polaris",
+      name: "AutoDev",
       description: "An expert AI coding assistant",
       system: systemPrompt,
        model: anthropic({
@@ -173,7 +173,7 @@ export const processMessage = inngest.createFunction(
 
     // Create network with single agent
     const network = createNetwork({
-      name: "polaris-network",
+      name: "AutoDev-network",
       agents: [codingAgent],
       maxIter: 20,
       router: ({ network }) => {

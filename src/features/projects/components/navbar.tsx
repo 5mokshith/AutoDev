@@ -84,7 +84,7 @@ export const Navbar = ({
                 >
                   <Link href="/">
                     <Image
-                      src="/logo.svg"
+                      src="/logo.png"
                       alt="Logo"
                       width={20}
                       height={20}
@@ -95,7 +95,7 @@ export const Navbar = ({
                         font.className,
                       )}
                     >
-                      Polaris
+                      AutoDev
                     </span>
                   </Link>
                 </Button>

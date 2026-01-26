@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const internalKey = process.env.POLARIS_CONVEX_INTERNAL_KEY;
+  const internalKey = process.env.AutoDev_CONVEX_INTERNAL_KEY;
 
   if (!internalKey) {
     return NextResponse.json(

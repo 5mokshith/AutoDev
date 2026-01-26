@@ -30,7 +30,7 @@ export const exportToGithub = inngest.createFunction(
       },
     ],
     onFailure: async ({ event, step }) => {
-      const internalKey = process.env.POLARIS_CONVEX_INTERNAL_KEY;
+      const internalKey = process.env.AutoDev_CONVEX_INTERNAL_KEY;
       if (!internalKey) return;
 
       const { projectId } = event.data.event.data as ExportToGithubEvent;
@@ -56,9 +56,9 @@ export const exportToGithub = inngest.createFunction(
       githubToken,
     } = event.data as ExportToGithubEvent;
 
-    const internalKey = process.env.POLARIS_CONVEX_INTERNAL_KEY;
+    const internalKey = process.env.AutoDev_CONVEX_INTERNAL_KEY;
     if (!internalKey) {
-      throw new NonRetriableError("POLARIS_CONVEX_INTERNAL_KEY is not configured");
+      throw new NonRetriableError("AutoDev_CONVEX_INTERNAL_KEY is not configured");
     };
 
     // Set status to exporting
@@ -81,7 +81,7 @@ export const exportToGithub = inngest.createFunction(
     const { data: repo } = await step.run("create-repo", async () => {
       return await octokit.rest.repos.createForAuthenticatedUser({
         name: repoName,
-        description: description || `Exported from Polaris`,
+        description: description || `Exported from AutoDev`,
         private: visibility === "private",
         auto_init: true,
       });
@@ -209,7 +209,7 @@ export const exportToGithub = inngest.createFunction(
       return await octokit.rest.git.createCommit({
         owner: user.login,
         repo: repoName,
-        message: "Initial commit from Polaris",
+        message: "Initial commit from AutoDev",
         tree: tree.sha,
         parents: [initialCommitSha],
       });

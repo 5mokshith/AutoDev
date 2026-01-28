@@ -26,6 +26,12 @@ interface MessageEvent {
   message: string;
 };
 
+const CODING_MODEL = process.env.AUTODEV_GEMINI_CODING_MODEL ?? "gemini-2.5-flash";
+const CODING_MAX_OUTPUT_TOKENS = Number.parseInt(
+  process.env.AUTODEV_GEMINI_CODING_MAX_OUTPUT_TOKENS ?? "4096",
+  10
+);
+
 export const processMessage = inngest.createFunction(
   {
     id: "process-message",
@@ -158,9 +164,14 @@ export const processMessage = inngest.createFunction(
       description: "An expert AI coding assistant",
       system: systemPrompt,
        model: gemini({
-        model: "gemini-2.5-pro",
+        model: CODING_MODEL,
         defaultParameters: {
-          generationConfig: { temperature: 0.3, maxOutputTokens: 16000 },
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: Number.isFinite(CODING_MAX_OUTPUT_TOKENS)
+              ? CODING_MAX_OUTPUT_TOKENS
+              : 4096,
+          },
         },
        }),
        tools: [

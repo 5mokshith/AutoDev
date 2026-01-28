@@ -1,4 +1,4 @@
-import { createAgent, anthropic, createNetwork } from '@inngest/agent-kit';
+import { createAgent, createNetwork, gemini } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -117,9 +117,11 @@ export const processMessage = inngest.createFunction(
        const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: anthropic({
-          model: "claude-3-5-haiku-20241022",
-          defaultParameters: { temperature: 0, max_tokens: 50 },
+        model: gemini({
+          model: "gemini-2.5-flash",
+          defaultParameters: {
+            generationConfig: { temperature: 0, maxOutputTokens: 50 },
+          },
         }),
        });
 
@@ -155,9 +157,11 @@ export const processMessage = inngest.createFunction(
       name: "AutoDev",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-       model: anthropic({
-        model: "claude-opus-4-20250514",
-        defaultParameters: { temperature: 0.3, max_tokens: 16000 }
+       model: gemini({
+        model: "gemini-2.5-pro",
+        defaultParameters: {
+          generationConfig: { temperature: 0.3, maxOutputTokens: 16000 },
+        },
        }),
        tools: [
         createListFilesTool({ internalKey, projectId }),

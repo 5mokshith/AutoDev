@@ -2,9 +2,13 @@ import { z } from "zod";
 import { generateText, Output } from "ai";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { anthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
 import { firecrawl } from "@/lib/firecrawl";
+
+const googleGenAI = createGoogleGenerativeAI({
+  apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+});
 
 const quickEditSchema = z.object({
   editedCode: z
@@ -102,7 +106,7 @@ export async function POST(request: Request) {
       .replace("{documentation}", documentationContext);
 
     const { output } = await generateText({
-      model: anthropic("claude-3-7-sonnet-20250219"),
+      model: googleGenAI("gemini-2.5-pro"),
       output: Output.object({ schema: quickEditSchema }),
       prompt,
     });

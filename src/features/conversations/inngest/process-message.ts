@@ -1,4 +1,4 @@
-import { createAgent, anthropic, createNetwork } from '@inngest/agent-kit';
+import { createAgent, createNetwork, gemini } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -25,6 +25,12 @@ interface MessageEvent {
   projectId: Id<"projects">;
   message: string;
 };
+
+const CODING_MODEL = process.env.AUTODEV_GEMINI_CODING_MODEL ?? "gemini-2.5-flash";
+const CODING_MAX_OUTPUT_TOKENS = Number.parseInt(
+  process.env.AUTODEV_GEMINI_CODING_MAX_OUTPUT_TOKENS ?? "4096",
+  10
+);
 
 export const processMessage = inngest.createFunction(
   {
@@ -117,9 +123,11 @@ export const processMessage = inngest.createFunction(
        const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: anthropic({
-          model: "claude-3-5-haiku-20241022",
-          defaultParameters: { temperature: 0, max_tokens: 50 },
+        model: gemini({
+          model: "gemini-2.5-flash",
+          defaultParameters: {
+            generationConfig: { temperature: 0, maxOutputTokens: 50 },
+          },
         }),
        });
 
@@ -155,9 +163,16 @@ export const processMessage = inngest.createFunction(
       name: "AutoDev",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-       model: anthropic({
-        model: "claude-opus-4-20250514",
-        defaultParameters: { temperature: 0.3, max_tokens: 16000 }
+       model: gemini({
+        model: CODING_MODEL,
+        defaultParameters: {
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: Number.isFinite(CODING_MAX_OUTPUT_TOKENS)
+              ? CODING_MAX_OUTPUT_TOKENS
+              : 4096,
+          },
+        },
        }),
        tools: [
         createListFilesTool({ internalKey, projectId }),

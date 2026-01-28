@@ -158,13 +158,18 @@ export const useWebContainer = ({
 
         // Parse dev command (default: npm run dev)
         let devCmd = settings?.devCommand || "npm run dev";
-        if (isNextProject && !devCmd.includes("--no-turbo")) {
-          if (devCmd === "npm run dev") {
-            devCmd = "npm run dev -- --no-turbo";
-          } else if (devCmd.startsWith("npm run dev ")) {
-            devCmd = `${devCmd} -- --no-turbo`;
-          } else if (devCmd.startsWith("next dev")) {
-            devCmd = `${devCmd} --no-turbo`;
+        if (isNextProject) {
+          const hasWebpack = devCmd.includes("--webpack");
+          if (!hasWebpack) {
+            if (devCmd.includes("--turbo")) {
+              devCmd = devCmd.replace("--turbo", "--webpack");
+            } else if (devCmd === "npm run dev") {
+              devCmd = "npm run dev -- --webpack";
+            } else if (devCmd.startsWith("npm run dev ")) {
+              devCmd = `${devCmd} -- --webpack`;
+            } else if (devCmd.startsWith("next dev")) {
+              devCmd = `${devCmd} --webpack`;
+            }
           }
         }
 

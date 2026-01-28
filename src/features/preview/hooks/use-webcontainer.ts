@@ -6,33 +6,40 @@ import {
   getFilePath
 } from "@/features/preview/utils/file-tree";
 import { useFiles } from "@/features/projects/hooks/use-files";
-
-import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 
 // Singleton WebContainer instance
-let webcontainerInstance: WebContainer | null = null;
-let bootPromise: Promise<WebContainer> | null = null;
+const globalStore = globalThis as unknown as {
+  __autodevWebcontainer?: {
+    instance: WebContainer | null;
+    bootPromise: Promise<WebContainer> | null;
+  };
+};
+
+const store = (globalStore.__autodevWebcontainer ??= {
+  instance: null,
+  bootPromise: null,
+});
 
 const getWebContainer = async (): Promise<WebContainer> => {
-  if (webcontainerInstance) {
-    return webcontainerInstance;
+  if (store.instance) {
+    return store.instance;
   }
 
-  if (!bootPromise) {
-    bootPromise = WebContainer.boot({ coep: "credentialless" });
+  if (!store.bootPromise) {
+    store.bootPromise = WebContainer.boot({ coep: "credentialless" });
   }
 
-  webcontainerInstance = await bootPromise;
-  return webcontainerInstance;
+  store.instance = await store.bootPromise;
+  return store.instance;
 };
 
 const teardownWebContainer = () => {
-  if (webcontainerInstance) {
-    webcontainerInstance.teardown();
-    webcontainerInstance = null;
+  if (store.instance) {
+    store.instance.teardown();
+    store.instance = null;
   }
-  bootPromise = null;
+  store.bootPromise = null;
 };
 
 interface UseWebContainerProps {
@@ -59,6 +66,9 @@ export const useWebContainer = ({
 
   const containerRef = useRef<WebContainer | null>(null);
   const hasStartedRef = useRef(false);
+  const devProcessRef = useRef<{ kill?: () => void } | null>(null);
+  const installProcessRef = useRef<{ kill?: () => void } | null>(null);
+  const serverReadyListenerAttachedRef = useRef(false);
 
   // Fetch files from Convex (auto-updates on changes)
   const files = useFiles(projectId);
@@ -70,6 +80,7 @@ export const useWebContainer = ({
     }
 
     hasStartedRef.current = true;
+    let cancelled = false;
 
     const start = async () => {
       try {
@@ -87,10 +98,38 @@ export const useWebContainer = ({
         const fileTree = buildFileTree(files);
         await container.mount(fileTree);
 
-        container.on("server-ready", (_port, url) => {
-          setPreviewUrl(url);
-          setStatus("running");
-        });
+        const filesMap = new Map(files.map((f) => [f._id, f]));
+        const packageJsonFile = files.find(
+          (f) =>
+            f.type === "file" &&
+            f.name === "package.json" &&
+            !f.storageId &&
+            typeof f.content === "string" &&
+            getFilePath(f, filesMap as unknown as Map<Id<"files">, typeof f>) ===
+              "package.json"
+        );
+
+        let isNextProject = false;
+        if (packageJsonFile?.content) {
+          try {
+            const pkg = JSON.parse(packageJsonFile.content) as {
+              dependencies?: Record<string, string>;
+              devDependencies?: Record<string, string>;
+            };
+            isNextProject = Boolean(
+              pkg.dependencies?.next || pkg.devDependencies?.next
+            );
+          } catch {}
+        }
+
+        if (!serverReadyListenerAttachedRef.current) {
+          serverReadyListenerAttachedRef.current = true;
+          container.on("server-ready", (_port, url) => {
+            if (cancelled) return;
+            setPreviewUrl(url);
+            setStatus("running");
+          });
+        }
 
         setStatus("installing");
 
@@ -99,6 +138,9 @@ export const useWebContainer = ({
         const [installBin, ...installArgs] = installCmd.split(" ");
         appendOutput(`$ ${installCmd}\n`)
         const installProcess = await container.spawn(installBin, installArgs);
+        installProcessRef.current = installProcess as unknown as {
+          kill?: () => void;
+        };
         installProcess.output.pipeTo(
           new WritableStream({
             write(data) {
@@ -115,10 +157,23 @@ export const useWebContainer = ({
         }
 
         // Parse dev command (default: npm run dev)
-        const devCmd = settings?.devCommand || "npm run dev";
+        let devCmd = settings?.devCommand || "npm run dev";
+        if (isNextProject && !devCmd.includes("--no-turbo")) {
+          if (devCmd === "npm run dev") {
+            devCmd = "npm run dev -- --no-turbo";
+          } else if (devCmd.startsWith("npm run dev ")) {
+            devCmd = `${devCmd} -- --no-turbo`;
+          } else if (devCmd.startsWith("next dev")) {
+            devCmd = `${devCmd} --no-turbo`;
+          }
+        }
+
         const [devBin, ...devArgs] = devCmd.split(" ");
         appendOutput(`\n$ ${devCmd}\n`);
         const devProcess = await container.spawn(devBin, devArgs);
+        devProcessRef.current = devProcess as unknown as {
+          kill?: () => void;
+        };
         devProcess.output.pipeTo(
           new WritableStream({
             write(data) {
@@ -127,12 +182,17 @@ export const useWebContainer = ({
           })
         );
       } catch (error) {
+        if (cancelled) return;
         setError(error instanceof Error ? error.message : "Unknown error");
         setStatus("error");
       }
     };
 
     start();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     enabled,
     files,
@@ -168,9 +228,17 @@ export const useWebContainer = ({
 
   // Restart the entire WebContainer process
   const restart = useCallback(() => {
-    teardownWebContainer();
+    try {
+      installProcessRef.current?.kill?.();
+    } catch {}
+    try {
+      devProcessRef.current?.kill?.();
+    } catch {}
+
     containerRef.current = null;
     hasStartedRef.current = false;
+    installProcessRef.current = null;
+    devProcessRef.current = null;
     setStatus("idle");
     setPreviewUrl(null);
     setError(null);

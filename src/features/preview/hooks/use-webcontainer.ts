@@ -13,12 +13,16 @@ const globalStore = globalThis as unknown as {
   __autodevWebcontainer?: {
     instance: WebContainer | null;
     bootPromise: Promise<WebContainer> | null;
+    mountedProjectId: string | null;
+    installedSignature: string | null;
   };
 };
 
 const store = (globalStore.__autodevWebcontainer ??= {
   instance: null,
   bootPromise: null,
+  mountedProjectId: null,
+  installedSignature: null,
 });
 
 const getWebContainer = async (): Promise<WebContainer> => {
@@ -40,6 +44,8 @@ const teardownWebContainer = () => {
     store.instance = null;
   }
   store.bootPromise = null;
+  store.mountedProjectId = null;
+  store.installedSignature = null;
 };
 
 interface UseWebContainerProps {
@@ -69,6 +75,9 @@ export const useWebContainer = ({
   const devProcessRef = useRef<{ kill?: () => void } | null>(null);
   const installProcessRef = useRef<{ kill?: () => void } | null>(null);
   const serverReadyListenerAttachedRef = useRef(false);
+  const lastSyncedRef = useRef<Map<string, number>>(new Map());
+  const pendingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncInFlightRef = useRef(false);
 
   // Fetch files from Convex (auto-updates on changes)
   const files = useFiles(projectId);
@@ -95,8 +104,22 @@ export const useWebContainer = ({
         const container = await getWebContainer();
         containerRef.current = container;
 
-        const fileTree = buildFileTree(files);
-        await container.mount(fileTree);
+        try {
+          installProcessRef.current?.kill?.();
+        } catch {}
+        try {
+          devProcessRef.current?.kill?.();
+        } catch {}
+
+        installProcessRef.current = null;
+        devProcessRef.current = null;
+
+        if (store.mountedProjectId !== projectId) {
+          const fileTree = buildFileTree(files);
+          await container.mount(fileTree);
+          store.mountedProjectId = projectId;
+          store.installedSignature = null;
+        }
 
         const filesMap = new Map(files.map((f) => [f._id, f]));
         const packageJsonFile = files.find(
@@ -131,29 +154,60 @@ export const useWebContainer = ({
           });
         }
 
-        setStatus("installing");
-
-        // Parse install command (default: npm install)
-        const installCmd = settings?.installCommand || "npm install";
-        const [installBin, ...installArgs] = installCmd.split(" ");
-        appendOutput(`$ ${installCmd}\n`)
-        const installProcess = await container.spawn(installBin, installArgs);
-        installProcessRef.current = installProcess as unknown as {
-          kill?: () => void;
-        };
-        installProcess.output.pipeTo(
-          new WritableStream({
-            write(data) {
-              appendOutput(data);
-            },
-          })
+        const lockFile = files.find(
+          (f) =>
+            f.type === "file" &&
+            !f.storageId &&
+            typeof f.content === "string" &&
+            ["package-lock.json", "pnpm-lock.yaml", "yarn.lock"].includes(
+              f.name
+            ) &&
+            getFilePath(f, filesMap as unknown as Map<Id<"files">, typeof f>) ===
+              f.name
         );
-        const installExitCode = await installProcess.exit;
 
-        if (installExitCode !== 0) {
-          throw new Error(
-            `${installCmd} failed with code ${installExitCode}`
+        const installSignature = `${packageJsonFile?.content ?? ""}\n${
+          typeof lockFile?.content === "string" ? lockFile.content : ""
+        }`;
+
+        let hasNodeModules = false;
+        try {
+          await container.fs.readdir("node_modules");
+          hasNodeModules = true;
+        } catch {}
+
+        const shouldInstall =
+          !hasNodeModules || store.installedSignature !== installSignature;
+
+        if (shouldInstall) {
+          setStatus("installing");
+
+          // Parse install command (default: npm install)
+          const installCmd = settings?.installCommand || "npm install";
+          const [installBin, ...installArgs] = installCmd.split(" ");
+          appendOutput(`$ ${installCmd}\n`);
+          const installProcess = await container.spawn(installBin, installArgs);
+          installProcessRef.current = installProcess as unknown as {
+            kill?: () => void;
+          };
+          installProcess.output.pipeTo(
+            new WritableStream({
+              write(data) {
+                appendOutput(data);
+              },
+            })
           );
+          const installExitCode = await installProcess.exit;
+
+          if (installExitCode !== 0) {
+            throw new Error(
+              `${installCmd} failed with code ${installExitCode}`
+            );
+          }
+
+          store.installedSignature = installSignature;
+        } else {
+          appendOutput(`$ npm install (cached)\n`);
         }
 
         // Parse dev command (default: npm run dev)
@@ -211,14 +265,56 @@ export const useWebContainer = ({
     const container = containerRef.current;
     if (!container || !files || status !== "running") return;
 
+    if (pendingSyncTimerRef.current) {
+      clearTimeout(pendingSyncTimerRef.current);
+      pendingSyncTimerRef.current = null;
+    }
+
     const filesMap = new Map(files.map((f) => [f._id, f]));
 
-    for (const file of files) {
-      if (file.type !== "file" || file.storageId || !file.content) continue;
+    pendingSyncTimerRef.current = setTimeout(() => {
+      if (syncInFlightRef.current) return;
+      syncInFlightRef.current = true;
 
-      const filePath = getFilePath(file, filesMap);
-      container.fs.writeFile(filePath, file.content);
-    }
+      const run = async () => {
+        try {
+          const lastSynced = lastSyncedRef.current;
+          const currentPaths = new Set<string>();
+
+          for (const file of files) {
+            if (file.type !== "file" || file.storageId || !file.content) continue;
+
+            const filePath = getFilePath(file, filesMap);
+            currentPaths.add(filePath);
+
+            const lastUpdatedAt = lastSynced.get(filePath);
+            if (lastUpdatedAt === file.updatedAt) continue;
+
+            await container.fs.writeFile(filePath, file.content);
+            lastSynced.set(filePath, file.updatedAt);
+          }
+
+          for (const [path] of lastSynced) {
+            if (currentPaths.has(path)) continue;
+            try {
+              await container.fs.rm(path);
+            } catch {}
+            lastSynced.delete(path);
+          }
+        } finally {
+          syncInFlightRef.current = false;
+        }
+      };
+
+      void run();
+    }, 250);
+
+    return () => {
+      if (pendingSyncTimerRef.current) {
+        clearTimeout(pendingSyncTimerRef.current);
+        pendingSyncTimerRef.current = null;
+      }
+    };
   }, [files, status]);
 
   // Reset when disabled
@@ -232,13 +328,17 @@ export const useWebContainer = ({
   }, [enabled]);
 
   // Restart the entire WebContainer process
-  const restart = useCallback(() => {
+  const restart = useCallback((mode: "soft" | "hard" = "soft") => {
     try {
       installProcessRef.current?.kill?.();
     } catch {}
     try {
       devProcessRef.current?.kill?.();
     } catch {}
+
+    if (mode === "hard") {
+      teardownWebContainer();
+    }
 
     containerRef.current = null;
     hasStartedRef.current = false;

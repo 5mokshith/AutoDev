@@ -17,8 +17,29 @@ const splitCommand = (command: string): string[] => {
     const ch = command[i];
 
     if (quote) {
+      if (ch === "\\") {
+        const next = command[i + 1];
+        if (typeof next === "string") {
+          current += next;
+          i++;
+        } else {
+          current += ch;
+        }
+        continue;
+      }
       if (ch === quote) {
         quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (ch === "\\") {
+      const next = command[i + 1];
+      if (typeof next === "string") {
+        current += next;
+        i++;
       } else {
         current += ch;
       }
@@ -52,6 +73,11 @@ const getDirname = (path: string) => {
   const normalized = path.replace(/\\/g, "/");
   const idx = normalized.lastIndexOf("/");
   return idx === -1 ? "" : normalized.slice(0, idx);
+};
+
+const getBasename = (path: string) => {
+  const normalized = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  return normalized[normalized.length - 1] ?? "";
 };
 
 const isValidPathSegment = (name: string) => {
@@ -153,6 +179,38 @@ const getRunScriptCommandFor = (
     return ["pnpm", [script, ...extraArgs]] as const;
   }
   return ["npm", ["run", script, ...(extraArgs.length ? ["--", ...extraArgs] : [])]] as const;
+};
+
+const fixNestedNodeScriptPath = (
+  script: string,
+  projectRoot: string,
+  existingPathsLower: Set<string>
+) => {
+  if (projectRoot === ".") return script;
+
+  const parts = splitCommand(script);
+  if (parts.length < 2) return script;
+  if (parts[0] !== "node") return script;
+
+  const base = getBasename(projectRoot);
+  if (!base) return script;
+
+  const nodeArg = parts[1];
+  if (!nodeArg.startsWith(`${base}/`)) return script;
+
+  const rest = nodeArg.slice(base.length + 1);
+  if (!rest) return script;
+
+  const expectedPath = `${projectRoot}/${nodeArg}`.toLowerCase();
+  const actualPath = `${projectRoot}/${rest}`.toLowerCase();
+
+  if (existingPathsLower.has(actualPath) && !existingPathsLower.has(expectedPath)) {
+    const next = [...parts];
+    next[1] = rest;
+    return next.join(" ");
+  }
+
+  return script;
 };
 
 export const useWebContainer = ({
@@ -323,11 +381,11 @@ export const useWebContainer = ({
           );
         }
 
-        let isNextProject = false;
-        let isViteProject = false;
         let hasDevScript = false;
         let hasStartScript = false;
         let pkgManager: PackageManager = "npm";
+        let isNextProject = false;
+        let isViteProject = false;
         if (packageJsonFile?.content) {
           try {
             const pkg = JSON.parse(packageJsonFile.content) as {
@@ -335,17 +393,15 @@ export const useWebContainer = ({
               devDependencies?: Record<string, string>;
               scripts?: Record<string, string>;
             };
-            isNextProject = Boolean(
-              pkg.dependencies?.next || pkg.devDependencies?.next
-            );
-            isViteProject = Boolean(
-              pkg.dependencies?.vite ||
-                pkg.devDependencies?.vite ||
-                pkg.dependencies?.["@vitejs/plugin-react"] ||
-                pkg.devDependencies?.["@vitejs/plugin-react"]
-            );
             hasDevScript = Boolean(pkg.scripts?.dev);
             hasStartScript = Boolean(pkg.scripts?.start);
+
+            const deps = {
+              ...(pkg.dependencies ?? {}),
+              ...(pkg.devDependencies ?? {}),
+            };
+            isNextProject = Boolean(deps.next);
+            isViteProject = Boolean(deps.vite);
           } catch {}
         }
 
@@ -425,12 +481,49 @@ export const useWebContainer = ({
 
         // Parse dev command
         // If settings aren't provided, choose the best default based on package.json scripts.
-        let devCmd = settings?.devCommand || "";
+        const devCmdFromSettings = (settings?.devCommand || "").trim();
+        const normalizedLegacyDevCmd = devCmdFromSettings.replace(/\s+/g, " ");
+
+        const isLegacyHardcodedWebpackCmd =
+          normalizedLegacyDevCmd === "npm run dev -- --webpack";
+
+        let devCmd = isLegacyHardcodedWebpackCmd ? "" : devCmdFromSettings;
+
+        const projectFilesLower = new Set(
+          files
+            .filter((f) => f.type === "file")
+            .map((f) =>
+              getFilePath(
+                f,
+                filesMap as unknown as Map<Id<"files">, typeof f>
+              ).toLowerCase()
+            )
+        );
+
+        let devScript: string | null = null;
+        if (packageJsonFile?.content) {
+          try {
+            const pkg = JSON.parse(packageJsonFile.content) as {
+              scripts?: Record<string, string>;
+            };
+            devScript = pkg.scripts?.dev ?? null;
+          } catch {}
+        }
 
         if (!devCmd) {
-          if (hasDevScript) {
-            const [bin, args] = getRunScriptCommandFor(pkgManager, "dev");
-            devCmd = [bin, ...args].join(" ");
+          if (hasDevScript && devScript) {
+            const fixedDevScript = fixNestedNodeScriptPath(
+              devScript,
+              projectRoot,
+              projectFilesLower
+            );
+
+            if (fixedDevScript !== devScript) {
+              devCmd = fixedDevScript;
+            } else {
+              const [bin, args] = getRunScriptCommandFor(pkgManager, "dev");
+              devCmd = [bin, ...args].join(" ");
+            }
           } else if (hasStartScript) {
             const [bin, args] = getRunScriptCommandFor(pkgManager, "start");
             devCmd = [bin, ...args].join(" ");
@@ -439,23 +532,36 @@ export const useWebContainer = ({
           }
         }
 
-        if (isNextProject) {
-          const hasWebpack = devCmd.includes("--webpack");
-          if (!hasWebpack) {
-            if (devCmd.includes("--turbo")) {
-              devCmd = devCmd.replace("--turbo", "--webpack");
-            } else if (devCmd === "npm run dev") {
-              devCmd = "npm run dev -- --webpack";
-            } else if (devCmd.startsWith("npm run dev ")) {
-              devCmd = `${devCmd} -- --webpack`;
-            } else if (devCmd.startsWith("next dev")) {
-              devCmd = `${devCmd} --webpack`;
-            }
-          }
-        }
+        const ensureDevFlag = (cmd: string, flag: string) => {
+          const parts = splitCommand(cmd);
+          if (parts.includes(flag)) return cmd;
 
-        if (isViteProject && !devCmd.includes("--host")) {
-          devCmd = `${devCmd} -- --host`;
+          const separatorIndex = parts.indexOf("--");
+          if (separatorIndex !== -1) {
+            if (!parts.slice(separatorIndex + 1).includes(flag)) {
+              parts.push(flag);
+            }
+            return parts.join(" ");
+          }
+
+          const bin = parts[0] ?? "";
+          const isNpmRun = bin === "npm" && parts[1] === "run";
+          const isPnpmRun = bin === "pnpm" && parts[1] === "run";
+
+          if (isNpmRun || isPnpmRun) {
+            parts.push("--", flag);
+            return parts.join(" ");
+          }
+
+          parts.push(flag);
+          return parts.join(" ");
+        };
+
+        if (isNextProject) {
+          devCmd = ensureDevFlag(devCmd, "--webpack");
+        }
+        if (isViteProject) {
+          devCmd = ensureDevFlag(devCmd, "--host");
         }
 
         const [devBin, ...devArgs] = splitCommand(devCmd);
@@ -478,6 +584,15 @@ export const useWebContainer = ({
             },
           })
         );
+
+        void devProcess.exit.then((code) => {
+          if (cancelledRef.current) return;
+          if (serverReadyTokenRef.current !== serverReadyToken) return;
+          if (code === 0) return;
+
+          setError(`Dev process exited with code ${code}`);
+          setStatus("error");
+        });
       } catch (error) {
         if (cancelledRef.current) return;
         setError(
@@ -509,8 +624,6 @@ export const useWebContainer = ({
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !files || status !== "running") return;
-
-    const projectRoot = projectRootRef.current || ".";
 
     if (pendingSyncTimerRef.current) {
       clearTimeout(pendingSyncTimerRef.current);

@@ -1,6 +1,6 @@
 import ky from "ky";
 import { toast } from "sonner";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { 
   CopyIcon, 
   HistoryIcon, 
@@ -62,6 +62,7 @@ export const ConversationSidebar = ({
 }: ConversationSidebarProps) => {
   const [input, setInput] = useState("");
   const [optimisticMessages, setOptimisticMessages] = useState<UiMessage[]>([]);
+  const optimisticIdsRef = useRef<Set<string>>(new Set());
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -150,6 +151,9 @@ export const ConversationSidebar = ({
       const optimisticUserId = `optimistic_${nanoid()}`;
       const optimisticAssistantId = `optimistic_${nanoid()}`;
 
+      optimisticIdsRef.current.add(optimisticUserId);
+      optimisticIdsRef.current.add(optimisticAssistantId);
+
       setOptimisticMessages((prev) =>
         prev.concat([
           {
@@ -187,17 +191,21 @@ export const ConversationSidebar = ({
       setOptimisticMessages((prev) =>
         prev.map((m) => {
           if (m._id === optimisticUserId) {
+            optimisticIdsRef.current.delete(optimisticUserId);
             return { ...m, _id: res.userMessageId };
           }
           if (m._id === optimisticAssistantId) {
+            optimisticIdsRef.current.delete(optimisticAssistantId);
             return { ...m, _id: res.assistantMessageId };
           }
           return m;
         })
       );
     } catch {
+      const idsToRemove = new Set(optimisticIdsRef.current);
+      optimisticIdsRef.current.clear();
       setOptimisticMessages((prev) =>
-        prev.filter((m) => !m._id.startsWith("optimistic_"))
+        prev.filter((m) => !idsToRemove.has(m._id))
       );
       toast.error("Message failed to send");
     }

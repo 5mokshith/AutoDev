@@ -70,10 +70,15 @@ export const writeAiSelection = (selection: AiSelection) => {
 };
 
 export const normalizeAiSelection = (
-  selection?: AiSelection
+  selection?: AiSelection,
+  overrides?: { defaultGoogleModel?: string }
 ): { provider: AiProvider; model: string } => {
   const provider: AiProvider = selection?.provider ?? "google";
-  const model = selection?.model ?? DEFAULT_MODEL_BY_PROVIDER[provider];
+  const model =
+    selection?.model ??
+    (provider === "google" && overrides?.defaultGoogleModel
+      ? overrides.defaultGoogleModel
+      : DEFAULT_MODEL_BY_PROVIDER[provider]);
 
   return { provider, model };
 };

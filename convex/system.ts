@@ -304,8 +304,14 @@ export const createFiles = mutation({
       seen.add(key);
     }
 
+    seen.clear();
+
     for (const file of args.files) {
       if (!isValidFileName(file.name)) {
+        continue;
+      }
+      const key = file.name.toLowerCase();
+      if (seen.has(key)) {
         continue;
       }
       const existing = existingFiles.find(
@@ -313,6 +319,7 @@ export const createFiles = mutation({
       );
 
       if (existing) {
+        seen.add(key);
         results.push({
           name: file.name,
           fileId: existing._id,
@@ -329,6 +336,8 @@ export const createFiles = mutation({
         parentId: args.parentId,
         updatedAt: Date.now(),
       });
+
+      seen.add(key);
 
       results.push({ name: file.name, fileId });
     }

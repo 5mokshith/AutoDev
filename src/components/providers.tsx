@@ -20,7 +20,8 @@ const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 export const Providers = ({ children }: { children: React.ReactNode }) => {
   const pathname = usePathname();
-  const isAuthRoute = pathname === "/sign-in" || pathname === "/sign-up";
+  const isAuthRoute =
+    pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up");
 
   return (
     <ClerkProvider appearance={{ baseTheme: dark }}>

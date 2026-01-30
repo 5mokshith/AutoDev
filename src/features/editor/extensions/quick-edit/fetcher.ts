@@ -10,7 +10,7 @@ const editRequestSchema = z.object({
   instruction: z.string(),
   ai: z
     .object({
-      provider: z.enum(["google", "groq"]).optional(),
+      provider: z.enum(["google", "groq", "openai"]).optional(),
       model: z.string().optional(),
     })
     .optional(),

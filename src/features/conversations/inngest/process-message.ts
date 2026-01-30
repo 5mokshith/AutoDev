@@ -128,7 +128,9 @@ export const processMessage = inngest.createFunction(
       ai,
     } = event.data as MessageEvent;
 
-    const modelSelection = normalizeAiSelection(ai);
+    const modelSelection = normalizeAiSelection(ai, {
+      defaultGoogleModel: CODING_MODEL,
+    });
 
     const internalKey = process.env.AutoDev_CONVEX_INTERNAL_KEY; 
 
@@ -245,10 +247,7 @@ export const processMessage = inngest.createFunction(
        model: getAgentKitModel(
         {
           provider: modelSelection.provider,
-          model:
-            modelSelection.provider === "google"
-              ? (ai?.model ?? CODING_MODEL)
-              : modelSelection.model,
+          model: modelSelection.model,
         },
         {
           temperature: 0.3,
@@ -303,8 +302,7 @@ export const processMessage = inngest.createFunction(
           : modelSelection.provider === "openai"
             ? "OpenAI"
             : "Gemini";
-      const modelLabel =
-        modelSelection.provider === "google" ? (ai?.model ?? CODING_MODEL) : modelSelection.model;
+      const modelLabel = modelSelection.model;
 
       await step.run("update-assistant-message", async () => {
         await convex.mutation(api.system.updateMessageContent, {

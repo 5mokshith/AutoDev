@@ -2,13 +2,13 @@ import { z } from "zod";
 import { generateText, Output } from "ai";
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
 import { firecrawl } from "@/lib/firecrawl";
-
-const googleGenAI = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-});
+import {
+  getLanguageModel,
+  getQuickEditModelSelection,
+  type AiSelection,
+} from "@/lib/ai-providers";
 
 const quickEditSchema = z.object({
   editedCode: z
@@ -47,7 +47,7 @@ If the instruction is unclear or cannot be applied, return the original code unc
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();
-    const { selectedCode, fullCode, instruction } = await request.json();
+    const { selectedCode, fullCode, instruction, ai } = await request.json();
 
     if (!userId) {
       return NextResponse.json(
@@ -105,8 +105,11 @@ export async function POST(request: Request) {
       .replace("{instruction}", instruction)
       .replace("{documentation}", documentationContext);
 
+    const selection = getQuickEditModelSelection(ai as AiSelection | undefined);
+    const model = getLanguageModel(selection);
+
     const { output } = await generateText({
-      model: googleGenAI("gemini-2.5-pro"),
+      model,
       output: Output.object({ schema: quickEditSchema }),
       prompt,
     });

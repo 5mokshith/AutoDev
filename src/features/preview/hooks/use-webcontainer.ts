@@ -74,7 +74,8 @@ export const useWebContainer = ({
   const hasStartedRef = useRef(false);
   const devProcessRef = useRef<{ kill?: () => void } | null>(null);
   const installProcessRef = useRef<{ kill?: () => void } | null>(null);
-  const serverReadyListenerAttachedRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const serverReadyTokenRef = useRef(0);
   const lastSyncedRef = useRef<Map<string, number>>(new Map());
   const pendingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncInFlightRef = useRef(false);
@@ -89,7 +90,8 @@ export const useWebContainer = ({
     }
 
     hasStartedRef.current = true;
-    let cancelled = false;
+    cancelledRef.current = false;
+    const serverReadyToken = ++serverReadyTokenRef.current;
 
     const start = async () => {
       try {
@@ -145,14 +147,12 @@ export const useWebContainer = ({
           } catch {}
         }
 
-        if (!serverReadyListenerAttachedRef.current) {
-          serverReadyListenerAttachedRef.current = true;
-          container.on("server-ready", (_port, url) => {
-            if (cancelled) return;
-            setPreviewUrl(url);
-            setStatus("running");
-          });
-        }
+        container.on("server-ready", (_port, url) => {
+          if (cancelledRef.current) return;
+          if (serverReadyTokenRef.current !== serverReadyToken) return;
+          setPreviewUrl(url);
+          setStatus("running");
+        });
 
         const lockFile = files.find(
           (f) =>
@@ -241,7 +241,7 @@ export const useWebContainer = ({
           })
         );
       } catch (error) {
-        if (cancelled) return;
+        if (cancelledRef.current) return;
         setError(error instanceof Error ? error.message : "Unknown error");
         setStatus("error");
       }
@@ -250,7 +250,8 @@ export const useWebContainer = ({
     start();
 
     return () => {
-      cancelled = true;
+      cancelledRef.current = true;
+      serverReadyTokenRef.current++;
     };
   }, [
     enabled,
@@ -335,6 +336,9 @@ export const useWebContainer = ({
     try {
       devProcessRef.current?.kill?.();
     } catch {}
+
+    cancelledRef.current = true;
+    serverReadyTokenRef.current++;
 
     if (mode === "hard") {
       teardownWebContainer();

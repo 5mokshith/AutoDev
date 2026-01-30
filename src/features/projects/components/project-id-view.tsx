@@ -6,6 +6,7 @@ import { FaGithub } from "react-icons/fa";
 
 import { cn } from "@/lib/utils";
 import { EditorView } from "@/features/editor/components/editor-view";
+import { AiModelSelector } from "@/components/ai-elements/ai-model-selector";
 
 import { FileExplorer } from "./file-explorer";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -59,7 +60,8 @@ export const ProjectIdView = ({
           isActive={activeView === "preview"}
           onClick={() => setActiveView("preview")}
         />
-        <div className="flex-1 flex justify-end h-full">
+        <div className="flex-1 flex justify-end items-center gap-2 h-full pr-2">
+          <AiModelSelector />
           <ExportPopover projectId={projectId} />
         </div>
       </nav>

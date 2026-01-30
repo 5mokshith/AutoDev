@@ -30,6 +30,8 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
+import { AiModelSelector } from "@/components/ai-elements/ai-model-selector";
+import { readAiSelection } from "@/lib/ai-selection";
 
 import {
   useConversation,
@@ -120,6 +122,7 @@ export const ConversationSidebar = ({
         json: {
           conversationId,
           message: message.text,
+          ai: readAiSelection(),
         },
       });
     } catch {
@@ -201,6 +204,9 @@ export const ConversationSidebar = ({
           <ConversationScrollButton />
         </Conversation>
         <div className="p-3">
+          <div className="flex items-center justify-end mb-2">
+            <AiModelSelector />
+          </div>
           <PromptInput 
             onSubmit={handleSubmit}
             className="mt-2"

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { AiModelSelector } from "@/components/ai-elements/ai-model-selector";
 
 import { ProjectsList } from "./projects-list";
 import { ProjectsCommandDialog } from "./projects-command-dialog";
@@ -75,6 +76,8 @@ export const ProjectsView = () => {
                 AutoDev
               </h1> */}
             </div>
+
+            <AiModelSelector />
 
           </div>
 

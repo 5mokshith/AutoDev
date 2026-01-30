@@ -31,6 +31,10 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
     settings: project?.settings,
   });
 
+  const handleRestart = () => {
+    restart();
+  };
+
   const isLoading = status === "booting" || status === "installing";
 
   return (
@@ -41,7 +45,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           variant="ghost"
           className="h-full rounded-none"
           disabled={isLoading}
-          onClick={restart}
+          onClick={handleRestart}
           title="Restart container"
         >
           <RefreshCwIcon className="size-3" />
@@ -70,7 +74,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
         <PreviewSettingsPopover
           projectId={projectId}
           initialValues={project?.settings}
-          onSave={restart}
+          onSave={handleRestart}
         />
       </div>
 
@@ -82,7 +86,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                 <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
                   <AlertTriangleIcon className="size-6" />
                   <p className="text-sm font-medium">{error}</p>
-                  <Button size="sm" variant="outline" onClick={restart}>
+                  <Button size="sm" variant="outline" onClick={handleRestart}>
                     <RefreshCwIcon className="size-4" />
                     Restart
                   </Button>

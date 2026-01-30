@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ky from "ky";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -22,6 +22,8 @@ import {
   PromptInputTools,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import { AiModelSelector } from "@/components/ai-elements/ai-model-selector";
+import { readAiSelection } from "@/lib/ai-selection";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
@@ -46,7 +48,7 @@ export const NewProjectDialog = ({
     try {
       const { projectId } = await ky
         .post("/api/projects/create-with-prompt", {
-          json: { prompt: message.text.trim() },
+          json: { prompt: message.text.trim(), ai: readAiSelection() },
         })
         .json<{ projectId: Id<"projects"> }>();
 
@@ -73,6 +75,9 @@ export const NewProjectDialog = ({
             Describe your project and AI will help you create it.
           </DialogDescription>
         </DialogHeader>
+        <div className="flex items-center justify-end px-6 pt-4">
+          <AiModelSelector />
+        </div>
         <PromptInput onSubmit={handleSubmit} className="border-none!">
           <PromptInputBody>
             <PromptInputTextarea

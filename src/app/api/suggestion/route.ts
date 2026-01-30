@@ -2,12 +2,11 @@ import { generateText, Output } from "ai";
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-// import { google } from "@ai-sdk/google";
-
-const googleGenAI = createGoogleGenerativeAI({
-  apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-});
+import {
+  getCodingModelSelection,
+  getLanguageModel,
+  type AiSelection,
+} from "@/lib/ai-providers";
 
 const suggestionSchema = z.object({
   suggestion: z
@@ -67,6 +66,7 @@ export async function POST(request: Request) {
       textAfterCursor,
       nextLines,
       lineNumber,
+      ai,
     } = await request.json();
 
     if (!code) {
@@ -86,8 +86,11 @@ export async function POST(request: Request) {
       .replace("{nextLines}", nextLines || "")
       .replace("{lineNumber}", lineNumber.toString());
 
+    const selection = getCodingModelSelection(ai as AiSelection | undefined);
+    const model = getLanguageModel(selection);
+
     const { output } = await generateText({
-      model: googleGenAI("gemini-2.5-flash"),
+      model,
       output: Output.object({ schema: suggestionSchema }),
       prompt,
     });

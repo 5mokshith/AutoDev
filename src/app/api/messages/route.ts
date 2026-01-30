@@ -8,9 +8,17 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 
+const aiSelectionSchema = z
+  .object({
+    provider: z.enum(["google", "groq", "openai"]).optional(),
+    model: z.string().optional(),
+  })
+  .optional();
+
 const requestSchema = z.object({
   conversationId: z.string(),
   message: z.string(),
+  ai: aiSelectionSchema,
 });
 
 export async function POST(request: Request) {
@@ -30,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { conversationId, message } = requestSchema.parse(body);
+  const { conversationId, message, ai } = requestSchema.parse(body);
 
   // Call convex mutation, query
   const conversation = await convex.query(api.system.getConversationById, {
@@ -106,6 +114,7 @@ export async function POST(request: Request) {
       conversationId,
       projectId,
       message,
+      ai,
     },
   });
 

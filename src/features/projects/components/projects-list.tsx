@@ -52,7 +52,7 @@ const ContinueCard = ({
       <Button
         variant="outline"
         asChild
-        className="h-auto items-start justify-start p-4 bg-background border rounded-none flex flex-col gap-2"
+        className="h-auto items-start justify-start p-4 bg-background/30 border rounded-xl flex flex-col gap-2"
       >
         <Link href={`/projects/${data._id}`} className="group">
           <div className="flex items-center justify-between w-full">

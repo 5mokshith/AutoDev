@@ -14,6 +14,18 @@ const validateInternalKey = (key: string) => {
   }
 };
 
+const isValidFileName = (name: string) => {
+  if (!name) return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  if (trimmed === "." || trimmed === "..") return false;
+  if (trimmed.includes("/") || trimmed.includes("\\")) return false;
+  if (trimmed.includes("\u0000")) return false;
+  return true;
+};
+
+const equalsIgnoreCase = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
 export const getConversationById = query({
   args: {
     conversationId: v.id("conversations"),
@@ -221,6 +233,10 @@ export const createFile = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (!isValidFileName(args.name)) {
+      throw new Error("Invalid file name");
+    }
+
     const files = await ctx.db
       .query("files")
       .withIndex("by_project_parent", (q) =>
@@ -229,7 +245,7 @@ export const createFile = mutation({
       .collect();
 
     const existing = files.find(
-      (file) => file.name === args.name && file.type === "file"
+      (file) => equalsIgnoreCase(file.name, args.name) && file.type === "file"
     );
 
     if (existing) {
@@ -274,9 +290,26 @@ export const createFiles = mutation({
 
     const results: { name: string; fileId: string; error?: string }[] = [];
 
+    const seen = new Set<string>();
     for (const file of args.files) {
+      if (!isValidFileName(file.name)) {
+        results.push({ name: file.name, fileId: "", error: "Invalid file name" });
+        continue;
+      }
+      const key = file.name.toLowerCase();
+      if (seen.has(key)) {
+        results.push({ name: file.name, fileId: "", error: "Duplicate file name" });
+        continue;
+      }
+      seen.add(key);
+    }
+
+    for (const file of args.files) {
+      if (!isValidFileName(file.name)) {
+        continue;
+      }
       const existing = existingFiles.find(
-        (f) => f.name === file.name && f.type === "file"
+        (f) => equalsIgnoreCase(f.name, file.name) && f.type === "file"
       );
 
       if (existing) {
@@ -315,6 +348,10 @@ export const createFolder = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (!isValidFileName(args.name)) {
+      throw new Error("Invalid folder name");
+    }
+
     const files = await ctx.db
       .query("files")
       .withIndex("by_project_parent", (q) =>
@@ -323,7 +360,7 @@ export const createFolder = mutation({
       .collect();
 
     const existing = files.find(
-      (file) => file.name === args.name && file.type === "folder"
+      (file) => equalsIgnoreCase(file.name, args.name) && file.type === "folder"
     );
 
     if (existing) {
@@ -352,6 +389,10 @@ export const renameFile = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (!isValidFileName(args.newName)) {
+      throw new Error("Invalid name");
+    }
+
     const file = await ctx.db.get(args.fileId);
     if (!file) {
       throw new Error("File not found");
@@ -367,7 +408,7 @@ export const renameFile = mutation({
 
     const existing = siblings.find(
       (sibling) =>
-        sibling.name === args.newName &&
+        equalsIgnoreCase(sibling.name, args.newName) &&
         sibling.type === file.type &&
         sibling._id !== args.fileId
     );
@@ -483,6 +524,10 @@ export const createBinaryFile = mutation({
   handler: async (ctx, args) => {
     validateInternalKey(args.internalKey);
 
+    if (!isValidFileName(args.name)) {
+      throw new Error("Invalid file name");
+    }
+
     const files = await ctx.db
       .query("files")
       .withIndex("by_project_parent", (q) =>
@@ -491,7 +536,7 @@ export const createBinaryFile = mutation({
       .collect();
 
     const existing = files.find(
-      (file) => file.name === args.name && file.type === "file"
+      (file) => equalsIgnoreCase(file.name, args.name) && file.type === "file"
     );
 
     if (existing) {

@@ -25,7 +25,7 @@ export const FileBreadcrumbs = ({
 
   if (filePath === undefined || !activeTabId) {
     return (
-      <div className="p-2 bg-background pl-4 border-b">
+      <div className="p-2 bg-sidebar/40 pl-4 border-b border-border/60">
         <Breadcrumb>
           <BreadcrumbList className="sm:gap-0.5 gap-0.5">
             <BreadcrumbItem className="text-sm">
@@ -38,7 +38,7 @@ export const FileBreadcrumbs = ({
   }
 
   return (
-    <div className="p-2 bg-background pl-4 border-b">
+    <div className="p-2 bg-sidebar/40 pl-4 border-b border-border/60">
       <Breadcrumb>
         <BreadcrumbList className="sm:gap-0.5 gap-0.5">
           {filePath.map((item, index) => {

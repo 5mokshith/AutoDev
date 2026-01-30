@@ -75,9 +75,6 @@ export const NewProjectDialog = ({
             Describe your project and AI will help you create it.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-center justify-end px-6 pt-4">
-          <AiModelSelector />
-        </div>
         <PromptInput onSubmit={handleSubmit} className="border-none!">
           <PromptInputBody>
             <PromptInputTextarea
@@ -88,7 +85,9 @@ export const NewProjectDialog = ({
             />
           </PromptInputBody>
           <PromptInputFooter>
-             <PromptInputTools />
+             <PromptInputTools>
+               <AiModelSelector />
+             </PromptInputTools>
              <PromptInputSubmit disabled={!input || isSubmitting} />
           </PromptInputFooter>
         </PromptInput>

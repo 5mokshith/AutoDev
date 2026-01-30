@@ -60,7 +60,7 @@ export const FileExplorer = ({
         <div
           role="button"
           onClick={() => setIsOpen((value) => !value)}
-          className="group/project cursor-pointer w-full text-left flex items-center gap-0.5 h-5.5 bg-accent font-bold"
+          className="group/project cursor-pointer w-full text-left flex items-center gap-0.5 h-6 border-b border-border/60 bg-sidebar/60 backdrop-blur font-semibold"
         >
           <ChevronRightIcon
             className={cn(
@@ -68,7 +68,7 @@ export const FileExplorer = ({
               isOpen && "rotate-90"
             )}
           />
-          <p className="text-xs uppercase line-clamp-1">
+          <p className="text-[11px] uppercase tracking-wide line-clamp-1">
             {project?.name ?? "Loading..."}
           </p>
           <div className="opacity-0 group-hover/project:opacity-100 transition-none duration-0 flex items-center gap-0.5 ml-auto">

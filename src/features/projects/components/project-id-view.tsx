@@ -59,7 +59,7 @@ export const ProjectIdView = ({
           isActive={activeView === "preview"}
           onClick={() => setActiveView("preview")}
         />
-        <div className="flex-1 flex justify-end h-full">
+        <div className="flex-1 flex justify-end items-center gap-2 h-full pr-2">
           <ExportPopover projectId={projectId} />
         </div>
       </nav>

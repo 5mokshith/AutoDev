@@ -1,4 +1,8 @@
+"use client";
+
 import { ShieldAlertIcon } from "lucide-react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   Item,
@@ -12,17 +16,23 @@ import { SignInButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 
 export const UnauthenticatedView = () => {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/sign-in");
+  }, [router]);
+
   return (
     <div className="flex items-center justify-center h-screen bg-background">
-      <div className="w-full max-w-lg bg-muted">
-        <Item variant="outline">
+      <div className="w-full max-w-lg">
+        <Item variant="outline" className="bg-card/60 backdrop-blur">
           <ItemMedia variant="icon">
             <ShieldAlertIcon />
           </ItemMedia>
           <ItemContent>
-            <ItemTitle>Unauthorized Access</ItemTitle>
+            <ItemTitle>Sign in required</ItemTitle>
             <ItemDescription>
-              You are not authorized to access this resource.
+              Redirecting you to the sign-in page...
             </ItemDescription>
           </ItemContent>
           <ItemActions>

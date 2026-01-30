@@ -31,23 +31,27 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
     settings: project?.settings,
   });
 
+  const handleRestart = () => {
+    restart();
+  };
+
   const isLoading = status === "booting" || status === "installing";
 
   return (
     <div className="h-full flex flex-col bg-background">
-      <div className="h-8.75 flex items-center border-b bg-sidebar shrink-0">
+      <div className="h-8.75 flex items-center border-b border-border/60 bg-sidebar/60 backdrop-blur shrink-0">
         <Button
           size="sm"
           variant="ghost"
           className="h-full rounded-none"
           disabled={isLoading}
-          onClick={restart}
+          onClick={handleRestart}
           title="Restart container"
         >
           <RefreshCwIcon className="size-3" />
         </Button>
 
-        <div className="flex-1 h-full flex items-center px-3 bg-background border-x text-xs text-muted-foreground truncate font-mono">
+        <div className="flex-1 h-full flex items-center px-3 bg-background/20 border-x border-border/60 text-xs text-muted-foreground truncate font-mono">
           {isLoading && (
             <div className="flex items-center gap-1.5">
               <Loader2Icon className="size-3 animate-spin" />
@@ -70,7 +74,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
         <PreviewSettingsPopover
           projectId={projectId}
           initialValues={project?.settings}
-          onSave={restart}
+          onSave={handleRestart}
         />
       </div>
 
@@ -82,7 +86,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                 <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
                   <AlertTriangleIcon className="size-6" />
                   <p className="text-sm font-medium">{error}</p>
-                  <Button size="sm" variant="outline" onClick={restart}>
+                  <Button size="sm" variant="outline" onClick={handleRestart}>
                     <RefreshCwIcon className="size-4" />
                     Restart
                   </Button>
@@ -110,8 +114,8 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
 
           {showTerminal && (
             <Allotment.Pane minSize={100} maxSize={500} preferredSize={200}>
-              <div className="h-full flex flex-col bg-background border-t">
-                <div className="h-7 flex items-center px-3 text-xs gap-1.5 text-muted-foreground border-b border-border/50 shrink-0">
+              <div className="h-full flex flex-col bg-background border-t border-border/60">
+                <div className="h-7 flex items-center px-3 text-xs gap-1.5 text-muted-foreground border-b border-border/60 bg-sidebar/40 shrink-0">
                   <TerminalSquareIcon className="size-3" />
                   Terminal
                 </div>

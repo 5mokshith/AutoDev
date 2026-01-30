@@ -1,4 +1,4 @@
-import { createAgent, createNetwork, gemini } from '@inngest/agent-kit';
+import { createAgent, createNetwork, gemini, openai } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -19,11 +19,14 @@ import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 
+import { normalizeAiSelection, type AiSelection } from "@/lib/ai-selection";
+
 interface MessageEvent {
   messageId: Id<"messages">;
   conversationId: Id<"conversations">;
   projectId: Id<"projects">;
   message: string;
+  ai?: AiSelection;
 };
 
 const CODING_MODEL = process.env.AUTODEV_GEMINI_CODING_MODEL ?? "gemini-2.5-flash";
@@ -31,6 +34,61 @@ const CODING_MAX_OUTPUT_TOKENS = Number.parseInt(
   process.env.AUTODEV_GEMINI_CODING_MAX_OUTPUT_TOKENS ?? "4096",
   10
 );
+
+const getAgentKitModel = (
+  selection: { provider: "google" | "groq" | "openai"; model: string },
+  params: {
+    temperature: number;
+    maxOutputTokens: number;
+  }
+) => {
+  if (selection.provider === "groq") {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      throw new NonRetriableError("GROQ_API_KEY is not configured");
+    }
+
+    return openai({
+      model: selection.model,
+      apiKey,
+      baseUrl: "https://api.groq.com/openai/v1/",
+      defaultParameters: {
+        temperature: params.temperature,
+        max_completion_tokens: params.maxOutputTokens,
+        tool_choice: "auto",
+        parallel_tool_calls: false,
+      },
+    });
+  }
+
+  if (selection.provider === "openai") {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new NonRetriableError("OPENAI_API_KEY is not configured");
+    }
+
+    return openai({
+      model: selection.model,
+      apiKey,
+      defaultParameters: {
+        temperature: params.temperature,
+        max_completion_tokens: params.maxOutputTokens,
+        tool_choice: "auto",
+        parallel_tool_calls: false,
+      },
+    });
+  }
+
+  return gemini({
+    model: selection.model,
+    defaultParameters: {
+      generationConfig: {
+        temperature: params.temperature,
+        maxOutputTokens: params.maxOutputTokens,
+      },
+    },
+  });
+};
 
 export const processMessage = inngest.createFunction(
   {
@@ -66,8 +124,13 @@ export const processMessage = inngest.createFunction(
       messageId, 
       conversationId,
       projectId,
-      message
+      message,
+      ai,
     } = event.data as MessageEvent;
+
+    const modelSelection = normalizeAiSelection(ai, {
+      defaultGoogleModel: CODING_MODEL,
+    });
 
     const internalKey = process.env.AutoDev_CONVEX_INTERNAL_KEY; 
 
@@ -100,7 +163,10 @@ export const processMessage = inngest.createFunction(
     });
 
     // Build system prompt with conversation history (exclude the current processing message)
-    let systemPrompt = CODING_AGENT_SYSTEM_PROMPT;
+    const customSystemPrompt = process.env.AUTODEV_CUSTOM_SYSTEM_PROMPT;
+    let systemPrompt = customSystemPrompt
+      ? `${customSystemPrompt}\n\n${CODING_AGENT_SYSTEM_PROMPT}`
+      : CODING_AGENT_SYSTEM_PROMPT;
 
     // Filter out the current processing message and empty messages
     const contextMessages = recentMessages.filter(
@@ -115,6 +181,21 @@ export const processMessage = inngest.createFunction(
       systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
     }
 
+    const sanitizeTitle = (raw: string) => {
+      const line = raw.split("\n")[0]?.trim() ?? "";
+      if (!line) return "";
+      // If the model leaked reasoning, fall back.
+      if (/\b(let me|i will|i'll|the user wants|let's think|okay,)\b/i.test(line)) {
+        return "";
+      }
+
+      // Remove surrounding quotes and trailing punctuation.
+      return line
+        .replace(/^"+|"+$/g, "")
+        .replace(/[.!?]+$/g, "")
+        .trim();
+    };
+
     // Generate conversation title if it's still the default
     const shouldGenerateTitle =
       conversation.title === DEFAULT_CONVERSATION_TITLE;
@@ -123,11 +204,9 @@ export const processMessage = inngest.createFunction(
        const titleAgent = createAgent({
         name: "title-generator",
         system: TITLE_GENERATOR_SYSTEM_PROMPT,
-        model: gemini({
-          model: "gemini-2.5-flash",
-          defaultParameters: {
-            generationConfig: { temperature: 0, maxOutputTokens: 50 },
-          },
+        model: getAgentKitModel(modelSelection, {
+          temperature: 0,
+          maxOutputTokens: 50,
         }),
        });
 
@@ -146,12 +225,14 @@ export const processMessage = inngest.createFunction(
               .join("")
               .trim();
 
-        if (title) {
+        const sanitizedTitle = sanitizeTitle(title);
+
+        if (sanitizedTitle) {
           await step.run("update-conversation-title", async () => {
             await convex.mutation(api.system.updateConversationTitle, {
               internalKey,
               conversationId,
-              title,
+              title: sanitizedTitle,
             });
           });
         }
@@ -163,17 +244,18 @@ export const processMessage = inngest.createFunction(
       name: "AutoDev",
       description: "An expert AI coding assistant",
       system: systemPrompt,
-       model: gemini({
-        model: CODING_MODEL,
-        defaultParameters: {
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: Number.isFinite(CODING_MAX_OUTPUT_TOKENS)
-              ? CODING_MAX_OUTPUT_TOKENS
-              : 4096,
-          },
+       model: getAgentKitModel(
+        {
+          provider: modelSelection.provider,
+          model: modelSelection.model,
         },
-       }),
+        {
+          temperature: 0.3,
+          maxOutputTokens: Number.isFinite(CODING_MAX_OUTPUT_TOKENS)
+            ? CODING_MAX_OUTPUT_TOKENS
+            : 4096,
+        }
+       ),
        tools: [
         createListFilesTool({ internalKey, projectId }),
         createReadFilesTool({ internalKey }),
@@ -210,7 +292,31 @@ export const processMessage = inngest.createFunction(
     });
 
     // Run the agent
-    const result = await network.run(message);
+    let result: Awaited<ReturnType<typeof network.run>>;
+    try {
+      result = await network.run(message);
+    } catch (err) {
+      const providerLabel =
+        modelSelection.provider === "groq"
+          ? "Groq"
+          : modelSelection.provider === "openai"
+            ? "OpenAI"
+            : "Gemini";
+      const modelLabel = modelSelection.model;
+
+      await step.run("update-assistant-message", async () => {
+        await convex.mutation(api.system.updateMessageContent, {
+          internalKey,
+          messageId,
+          content:
+            `I hit an error while running the agent with ${providerLabel} (${modelLabel}). ` +
+            `This usually happens when the model returns an invalid tool-call payload. ` +
+            `Try switching the model to one of: gpt-4o-mini, gpt-4o, qwen/qwen3-32b, openai/gpt-oss-20b, groq/compound-mini.`,
+        });
+      });
+
+      return { success: false, messageId, conversationId };
+    }
 
     // Extract the assistant's text response from the last agent result
     const lastResult = result.state.results.at(-1);

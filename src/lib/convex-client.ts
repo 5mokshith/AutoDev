@@ -17,10 +17,16 @@ const getClient = (): ConvexHttpClient => {
 };
 
 export const convex = {
-  query: (...args: Parameters<ConvexHttpClient["query"]>) =>
-    getClient().query(...args),
-  mutation: (...args: Parameters<ConvexHttpClient["mutation"]>) =>
-    getClient().mutation(...args),
-  action: (...args: Parameters<ConvexHttpClient["action"]>) =>
-    getClient().action(...args),
+  query: (...args: unknown[]) =>
+    (getClient() as unknown as { query: (...args: unknown[]) => unknown }).query(
+      ...args
+    ),
+  mutation: (...args: unknown[]) =>
+    (
+      getClient() as unknown as { mutation: (...args: unknown[]) => unknown }
+    ).mutation(...args),
+  action: (...args: unknown[]) =>
+    (getClient() as unknown as { action: (...args: unknown[]) => unknown }).action(
+      ...args
+    ),
 } as unknown as ConvexHttpClient;

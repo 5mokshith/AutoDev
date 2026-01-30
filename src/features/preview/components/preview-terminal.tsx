@@ -24,8 +24,14 @@ export const PreviewTerminal = ({ output }: PreviewTerminalProps) => {
       convertEol: true,
       disableStdin: true,
       fontSize: 12,
-      fontFamily: "monospace",
-      theme: { background: "#1f2228" },
+      fontFamily:
+        "var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      theme: {
+        background: "transparent",
+        foreground: "#e7e7e7",
+        cursor: "#e7e7e7",
+        selectionBackground: "rgba(255, 255, 255, 0.18)",
+      },
     });
 
     const fitAddon = new FitAddon();
@@ -75,7 +81,7 @@ export const PreviewTerminal = ({ output }: PreviewTerminalProps) => {
   return (
     <div
       ref={containerRef}
-      className="flex-1 min-h-0 p-3 [&_.xterm]:h-full! [&_.xterm-viewport]:h-full! [&_.xterm-screen]:h-full! bg-sidebar"
+      className="flex-1 min-h-0 p-3 select-text text-foreground bg-background/30 [&_.xterm]:h-full! [&_.xterm-viewport]:h-full! [&_.xterm-screen]:h-full!"
     />
   );
 };

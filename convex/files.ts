@@ -4,6 +4,18 @@ import { mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
 import { Doc, Id } from "./_generated/dataModel";
 
+const isValidFileName = (name: string) => {
+  if (!name) return false;
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  if (trimmed === "." || trimmed === "..") return false;
+  if (trimmed.includes("/") || trimmed.includes("\\")) return false;
+  if (trimmed.includes("\u0000")) return false;
+  return true;
+};
+
+const equalsIgnoreCase = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
 export const getFiles = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
@@ -33,7 +45,7 @@ export const getFile = query({
 
     const file = await ctx.db.get("files", args.id);
 
-     if (!file) {
+    if (!file) {
       throw new Error("File not found");
     }
 
@@ -84,7 +96,7 @@ export const getFilePath = query({
     let currentId: Id<"files"> | undefined = args.id;
 
     while (currentId) {
-      const file = (await ctx.db.get("files", currentId)) as 
+      const file = (await ctx.db.get("files", currentId)) as
         | Doc<"files">
         | undefined;
       if (!file) break;
@@ -98,7 +110,7 @@ export const getFilePath = query({
 });
 
 export const getFolderContents = query({
-  args: { 
+  args: {
     projectId: v.id("projects"),
     parentId: v.optional(v.id("files")),
   },
@@ -137,7 +149,7 @@ export const getFolderContents = query({
 });
 
 export const createFile = mutation({
-  args: { 
+  args: {
     projectId: v.id("projects"),
     parentId: v.optional(v.id("files")),
     name: v.string(),
@@ -145,6 +157,10 @@ export const createFile = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
+
+    if (!isValidFileName(args.name)) {
+      throw new Error("Invalid file name");
+    }
 
     const project = await ctx.db.get("projects", args.projectId);
 
@@ -167,7 +183,7 @@ export const createFile = mutation({
       .collect();
 
     const existing = files.find(
-      (file) => file.name === args.name && file.type === "file"
+      (file) => equalsIgnoreCase(file.name, args.name) && file.type === "file"
     );
 
     if (existing) throw new Error("File already exists");
@@ -190,13 +206,17 @@ export const createFile = mutation({
 });
 
 export const createFolder = mutation({
-  args: { 
+  args: {
     projectId: v.id("projects"),
     parentId: v.optional(v.id("files")),
     name: v.string(),
   },
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
+
+    if (!isValidFileName(args.name)) {
+      throw new Error("Invalid folder name");
+    }
 
     const project = await ctx.db.get("projects", args.projectId);
 
@@ -219,7 +239,7 @@ export const createFolder = mutation({
       .collect();
 
     const existing = files.find(
-      (file) => file.name === args.name && file.type === "folder"
+      (file) => equalsIgnoreCase(file.name, args.name) && file.type === "folder"
     );
 
     if (existing) throw new Error("Folder already exists");
@@ -248,6 +268,10 @@ export const renameFile = mutation({
   handler: async (ctx, args) => {
     const identity = await verifyAuth(ctx);
 
+    if (!isValidFileName(args.newName)) {
+      throw new Error("Invalid name");
+    }
+
     const file = await ctx.db.get("files", args.id);
 
     if (!file) throw new Error("File not found");
@@ -274,7 +298,7 @@ export const renameFile = mutation({
 
     const existing = siblings.find(
       (sibling) =>
-        sibling.name === args.newName &&
+        equalsIgnoreCase(sibling.name, args.newName) &&
         sibling.type === file.type &&
         sibling._id !== args.id
     );

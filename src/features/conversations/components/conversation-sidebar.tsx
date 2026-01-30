@@ -1,12 +1,13 @@
 import ky from "ky";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { 
   CopyIcon, 
   HistoryIcon, 
   LoaderIcon, 
   PlusIcon
 } from "lucide-react";
+import { nanoid } from "nanoid";
 
 import {
   Conversation,
@@ -30,6 +31,8 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
+import { AiModelSelector } from "@/components/ai-elements/ai-model-selector";
+import { readAiSelection } from "@/lib/ai-selection";
 
 import {
   useConversation,
@@ -46,10 +49,20 @@ interface ConversationSidebarProps {
   projectId: Id<"projects">;
 };
 
+type UiMessage = {
+  _id: string;
+  conversationId: string;
+  role: Doc<"messages">["role"];
+  content: Doc<"messages">["content"];
+  status: Doc<"messages">["status"];
+};
+
 export const ConversationSidebar = ({
   projectId,
 }: ConversationSidebarProps) => {
   const [input, setInput] = useState("");
+  const [optimisticMessages, setOptimisticMessages] = useState<UiMessage[]>([]);
+  const optimisticIdsRef = useRef<Set<string>>(new Set());
   const [
     selectedConversationId,
     setSelectedConversationId,
@@ -68,10 +81,29 @@ export const ConversationSidebar = ({
   const activeConversation = useConversation(activeConversationId);
   const conversationMessages = useMessages(activeConversationId);
 
+  const uiMessages = useMemo(() => {
+    const server = (conversationMessages ?? []).map(
+      (m): UiMessage => ({
+        _id: m._id,
+        conversationId: activeConversationId ?? "",
+        role: m.role,
+        content: m.content,
+        status: m.status,
+      })
+    );
+
+    const serverIds = new Set(server.map((m) => m._id));
+    const pending = optimisticMessages.filter(
+      (m) =>
+        m.conversationId === (activeConversationId ?? "") &&
+        !serverIds.has(m._id)
+    );
+
+    return server.concat(pending);
+  }, [activeConversationId, conversationMessages, optimisticMessages]);
+
   // Check if any message is currently processing
-  const isProcessing = conversationMessages?.some(
-    (msg: Doc<"messages">) => msg.status === "processing"
-  );
+  const isProcessing = uiMessages.some((msg) => msg.status === "processing");
 
   const handleCancel = async () => {
     try {
@@ -116,17 +148,67 @@ export const ConversationSidebar = ({
 
     // Trigger Inngest function via API
     try {
-      await ky.post("/api/messages", {
+      const optimisticUserId = `optimistic_${nanoid()}`;
+      const optimisticAssistantId = `optimistic_${nanoid()}`;
+
+      optimisticIdsRef.current.add(optimisticUserId);
+      optimisticIdsRef.current.add(optimisticAssistantId);
+
+      setOptimisticMessages((prev) =>
+        prev.concat([
+          {
+            _id: optimisticUserId,
+            conversationId,
+            role: "user",
+            content: message.text,
+            status: "completed",
+          },
+          {
+            _id: optimisticAssistantId,
+            conversationId,
+            role: "assistant",
+            content: "",
+            status: "processing",
+          },
+        ])
+      );
+
+      setInput("");
+
+      const res = await ky
+        .post("/api/messages", {
         json: {
           conversationId,
           message: message.text,
+          ai: readAiSelection(),
         },
-      });
+        })
+        .json<{
+          userMessageId: Id<"messages">;
+          assistantMessageId: Id<"messages">;
+        }>();
+
+      setOptimisticMessages((prev) =>
+        prev.map((m) => {
+          if (m._id === optimisticUserId) {
+            optimisticIdsRef.current.delete(optimisticUserId);
+            return { ...m, _id: res.userMessageId };
+          }
+          if (m._id === optimisticAssistantId) {
+            optimisticIdsRef.current.delete(optimisticAssistantId);
+            return { ...m, _id: res.assistantMessageId };
+          }
+          return m;
+        })
+      );
     } catch {
+      const idsToRemove = new Set(optimisticIdsRef.current);
+      optimisticIdsRef.current.clear();
+      setOptimisticMessages((prev) =>
+        prev.filter((m) => !idsToRemove.has(m._id))
+      );
       toast.error("Message failed to send");
     }
-
-    setInput("");
   }
 
   return (
@@ -161,7 +243,7 @@ export const ConversationSidebar = ({
         </div>
         <Conversation className="flex-1">
           <ConversationContent>
-            {conversationMessages?.map((message: Doc<"messages">, messageIndex) => (
+            {uiMessages.map((message: UiMessage, messageIndex) => (
               <Message
                 key={message._id}
                 from={message.role}
@@ -182,7 +264,7 @@ export const ConversationSidebar = ({
                 </MessageContent>
                 {message.role === "assistant" &&
                   message.status === "completed" &&
-                  messageIndex === (conversationMessages?.length ?? 0) - 1 && (
+                  messageIndex === uiMessages.length - 1 && (
                     <MessageActions>
                       <MessageAction
                         onClick={() => {
@@ -214,7 +296,9 @@ export const ConversationSidebar = ({
               />
             </PromptInputBody>
             <PromptInputFooter>
-              <PromptInputTools />
+              <PromptInputTools>
+                <AiModelSelector />
+              </PromptInputTools>
               <PromptInputSubmit
                 disabled={isProcessing ? false : !input}
                 status={isProcessing ? "streaming" : undefined}

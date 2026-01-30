@@ -15,8 +15,16 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 
+const aiSelectionSchema = z
+  .object({
+    provider: z.enum(["google", "groq", "openai"]).optional(),
+    model: z.string().optional(),
+  })
+  .optional();
+
 const requestSchema = z.object({
   prompt: z.string().min(1),
+  ai: aiSelectionSchema,
 });
 
 export async function POST(request: Request) {
@@ -36,7 +44,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { prompt } = requestSchema.parse(body);
+  const { prompt, ai } = requestSchema.parse(body);
 
   // Generate a random project name
   const projectName = uniqueNamesGenerator({
@@ -86,6 +94,7 @@ export async function POST(request: Request) {
       conversationId,
       projectId,
       message: prompt,
+      ai,
     },
   });
 

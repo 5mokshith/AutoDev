@@ -144,7 +144,7 @@ export const Tree = ({
       <>
         <button
           onClick={() => setIsOpen((value) => !value)}
-          className="group flex items-center gap-1 h-5.5 hover:bg-accent/30 w-full"
+          className="group flex items-center gap-1 h-6 hover:bg-white/5 w-full rounded-md pr-2"
           style={{ paddingLeft: getItemPadding(level, false) }}
         >
           {folderRender}

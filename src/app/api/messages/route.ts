@@ -8,9 +8,17 @@ import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 
+const aiSelectionSchema = z
+  .object({
+    provider: z.enum(["google", "groq", "openai"]).optional(),
+    model: z.string().optional(),
+  })
+  .optional();
+
 const requestSchema = z.object({
   conversationId: z.string(),
   message: z.string(),
+  ai: aiSelectionSchema,
 });
 
 export async function POST(request: Request) {
@@ -30,7 +38,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { conversationId, message } = requestSchema.parse(body);
+  const { conversationId, message, ai } = requestSchema.parse(body);
 
   // Call convex mutation, query
   const conversation = await convex.query(api.system.getConversationById, {
@@ -77,7 +85,7 @@ export async function POST(request: Request) {
   }
 
   // Create user message
-  await convex.mutation(api.system.createMessage, {
+  const userMessageId = await convex.mutation(api.system.createMessage, {
     internalKey,
     conversationId: conversationId as Id<"conversations">,
     projectId,
@@ -106,12 +114,14 @@ export async function POST(request: Request) {
       conversationId,
       projectId,
       message,
+      ai,
     },
   });
 
   return NextResponse.json({
     success: true,
     eventId: event.ids[0],
-    messageId: assistantMessageId,
+    userMessageId,
+    assistantMessageId,
   });
 };

@@ -72,7 +72,7 @@ export const createCreateFolderTool = ({
             status: "running",
             parentId: parentId ? (parentId as Id<"files">) : undefined,
             name,
-          });
+          }).catch(() => {});
 
           const folderId = await convex.mutation(api.system.createFolder, {
             internalKey,
@@ -91,7 +91,7 @@ export const createCreateFolderTool = ({
             parentId: parentId ? (parentId as Id<"files">) : undefined,
             fileId: folderId as unknown as Id<"files">,
             name,
-          });
+          }).catch(() => {});
 
           return `Folder created with ID: ${folderId}`;
         });

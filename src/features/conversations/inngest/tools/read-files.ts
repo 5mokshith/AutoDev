@@ -8,6 +8,9 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 
 interface ReadFilesToolOptions {
   internalKey: string;
+  projectId: Id<"projects">;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -16,7 +19,12 @@ const paramsSchema = z.object({
     .min(1, "Provide at least one file ID"),
 });
 
-export const createReadFilesTool = ({ internalKey }: ReadFilesToolOptions) => {
+export const createReadFilesTool = ({
+  internalKey,
+  projectId,
+  conversationId,
+  messageId,
+}: ReadFilesToolOptions) => {
   return createTool({
     name: "readFiles",
     description: "Read the content of files from the project. Returns file contents.",
@@ -33,6 +41,16 @@ export const createReadFilesTool = ({ internalKey }: ReadFilesToolOptions) => {
 
       try {
         return await toolStep?.run("read-files", async () => {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "readFiles",
+            status: "running",
+            fileIds: fileIds as unknown as Id<"files">[],
+          });
+
           const results: { id: string; name: string; content: string }[] = [];
 
           for (const fileId of fileIds) {
@@ -54,9 +72,31 @@ export const createReadFilesTool = ({ internalKey }: ReadFilesToolOptions) => {
             return "Error: No files found with provided IDs. Use listFiles to get valid fileIDs.";
           }
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "readFiles",
+            status: "done",
+            fileIds: results.map((r) => r.id) as unknown as Id<"files">[],
+            names: results.map((r) => r.name),
+          });
+
           return JSON.stringify(results);
         })
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "readFiles",
+            status: "error",
+            fileIds: fileIds as unknown as Id<"files">[],
+          });
+        } catch {}
         return `Error reading files: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

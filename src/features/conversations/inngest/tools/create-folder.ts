@@ -9,6 +9,8 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 interface CreateFolderToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -19,6 +21,8 @@ const paramsSchema = z.object({
 export const createCreateFolderTool = ({
   projectId,
   internalKey,
+  conversationId,
+  messageId,
 }: CreateFolderToolOptions) => {
   return createTool({
     name: "createFolder",
@@ -59,6 +63,17 @@ export const createCreateFolderTool = ({
             }
           }
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFolder",
+            status: "running",
+            parentId: parentId ? (parentId as Id<"files">) : undefined,
+            name,
+          }).catch(() => {});
+
           const folderId = await convex.mutation(api.system.createFolder, {
             internalKey,
             projectId,
@@ -66,9 +81,33 @@ export const createCreateFolderTool = ({
             parentId: parentId ? (parentId as Id<"files">) : undefined,
           });
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFolder",
+            status: "done",
+            parentId: parentId ? (parentId as Id<"files">) : undefined,
+            fileId: folderId as unknown as Id<"files">,
+            name,
+          }).catch(() => {});
+
           return `Folder created with ID: ${folderId}`;
         });
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFolder",
+            status: "error",
+            parentId: parentId ? (parentId as Id<"files">) : undefined,
+            name,
+          });
+        } catch {}
         return `Error creating folder: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

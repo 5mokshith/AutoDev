@@ -3,4 +3,5 @@ export {
   getById,
   getByProject,
   getMessages,
+  getAgentEventsForMessage,
 } from "./conversation";

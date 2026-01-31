@@ -9,6 +9,8 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -26,6 +28,8 @@ const paramsSchema = z.object({
 export const createCreateFilesTool = ({
   projectId,
   internalKey,
+  conversationId,
+  messageId,
 }: CreateFilesToolOptions) => {
   return createTool({
     name: "createFiles",
@@ -76,6 +80,17 @@ export const createCreateFilesTool = ({
             }
           }
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFiles",
+            status: "running",
+            parentId: resolvedParentId,
+            names: files.map((f) => f.name),
+          });
+
           const results = await convex.mutation(api.system.createFiles, {
             internalKey,
             projectId,
@@ -94,9 +109,34 @@ export const createCreateFilesTool = ({
             response += `. Failed: ${failed.map((r) => `${r.name} (${r.error})`).join(", ")}`;
           }
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFiles",
+            status: failed.length > 0 ? "error" : "done",
+            parentId: resolvedParentId,
+            names: created.map((r) => r.name),
+            fileIds: created
+              .map((r) => r.fileId)
+              .filter(Boolean) as unknown as Id<"files">[],
+          });
+
           return response;
         });
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFiles",
+            status: "error",
+            names: files.map((f) => f.name),
+          });
+        } catch {}
         return `Error creating files: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

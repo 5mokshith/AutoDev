@@ -257,13 +257,13 @@ export const processMessage = inngest.createFunction(
         }
        ),
        tools: [
-        createListFilesTool({ internalKey, projectId }),
-        createReadFilesTool({ internalKey }),
-        createUpdateFileTool({ internalKey }),
-        createCreateFilesTool({ projectId, internalKey }),
-        createCreateFolderTool({ projectId, internalKey }),
-        createRenameFileTool({ internalKey }),
-        createDeleteFilesTool({ internalKey }),
+        createListFilesTool({ internalKey, projectId, conversationId, messageId }),
+        createReadFilesTool({ internalKey, projectId, conversationId, messageId }),
+        createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
+        createCreateFilesTool({ projectId, internalKey, conversationId, messageId }),
+        createCreateFolderTool({ projectId, internalKey, conversationId, messageId }),
+        createRenameFileTool({ internalKey, projectId, conversationId, messageId }),
+        createDeleteFilesTool({ internalKey, projectId, conversationId, messageId }),
         createScrapeUrlsTool(),
        ],
     });

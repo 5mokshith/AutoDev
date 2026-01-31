@@ -14,6 +14,13 @@ export const useMessages = (conversationId: Id<"conversations"> | null) => {
   );
 };
 
+export const useAgentEventsForMessage = (messageId: Id<"messages"> | null) => {
+  return useQuery(
+    api.conversations.getAgentEventsForMessage,
+    messageId ? { messageId } : "skip"
+  );
+};
+
 export const useConversations = (projectId: Id<"projects">) => {
   return useQuery(api.conversations.getByProject, { projectId });
 };

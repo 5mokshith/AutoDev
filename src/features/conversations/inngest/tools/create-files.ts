@@ -9,6 +9,8 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -26,6 +28,8 @@ const paramsSchema = z.object({
 export const createCreateFilesTool = ({
   projectId,
   internalKey,
+  conversationId,
+  messageId,
 }: CreateFilesToolOptions) => {
   return createTool({
     name: "createFiles",
@@ -76,6 +80,17 @@ export const createCreateFilesTool = ({
               return `Error: Invalid parentId "${parentId}". Use listFiles to get valid folder IDs, or use empty string for root level.`;
             }
           }
+
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFiles",
+            status: "running",
+            parentId: resolvedParentId,
+            names: files.map((f) => f.name),
+          });
 
           const projectFiles = await convex.query(api.system.getProjectFiles, {
             internalKey,
@@ -170,9 +185,21 @@ export const createCreateFilesTool = ({
           if (failedNames.length > 0) {
             response += `. Failed: ${failedNames.join(", ")}`;
           }
+
           return response;
         });
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "createFiles",
+            status: "error",
+            names: files.map((f) => f.name),
+          });
+        } catch {}
         return `Error creating files: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

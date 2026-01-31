@@ -8,6 +8,9 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 
 interface RenameFileToolOptions {
   internalKey: string;
+  projectId: Id<"projects">;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -17,6 +20,9 @@ const paramsSchema = z.object({
 
 export const createRenameFileTool = ({
   internalKey,
+  projectId,
+  conversationId,
+  messageId,
 }: RenameFileToolOptions) => {
   return createTool({
     name: "renameFile",
@@ -45,15 +51,52 @@ export const createRenameFileTool = ({
 
       try {
         return await toolStep?.run("rename-file", async () => {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "renameFile",
+            status: "running",
+            fileId: fileId as Id<"files">,
+            name: newName,
+            names: [file.name],
+          });
+
           await convex.mutation(api.system.renameFile, {
             internalKey,
             fileId: fileId as Id<"files">,
             newName,
           });
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "renameFile",
+            status: "done",
+            fileId: fileId as Id<"files">,
+            name: newName,
+            names: [file.name],
+          });
+
           return `Renamed "${file.name}" to "${newName}" successfully`;        
         })
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "renameFile",
+            status: "error",
+            fileId: fileId as Id<"files">,
+            name: newName,
+            names: [file.name],
+          });
+        } catch {}
         return `Error renaming file: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

@@ -8,6 +8,9 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 
 interface UpdateFileToolOptions {
   internalKey: string;
+  projectId: Id<"projects">;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -17,6 +20,9 @@ const paramsSchema = z.object({
 
 export const createUpdateFileTool = ({
   internalKey,
+  projectId,
+  conversationId,
+  messageId,
 }: UpdateFileToolOptions) => {
   return createTool({
     name: "updateFile",
@@ -50,15 +56,49 @@ export const createUpdateFileTool = ({
 
       try {
         return await toolStep?.run("update-file", async () => {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "updateFile",
+            status: "running",
+            fileId: fileId as Id<"files">,
+            name: file.name,
+          });
+
           await convex.mutation(api.system.updateFile, {
             internalKey,
             fileId: fileId as Id<"files">,
             content,
           });
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "updateFile",
+            status: "done",
+            fileId: fileId as Id<"files">,
+            name: file.name,
+          });
+
           return `File "${file.name}" updated successfully`;
         })
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "updateFile",
+            status: "error",
+            fileId: fileId as Id<"files">,
+            name: file.name,
+          });
+        } catch {}
         return `Error update file: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

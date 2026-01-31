@@ -38,6 +38,44 @@ export const getConversationById = query({
   },
 });
 
+export const createAgentEvent = mutation({
+  args: {
+    internalKey: v.string(),
+    projectId: v.id("projects"),
+    conversationId: v.id("conversations"),
+    messageId: v.id("messages"),
+    type: v.union(
+      v.literal("createFiles"),
+      v.literal("updateFile"),
+      v.literal("createFolder"),
+      v.literal("renameFile"),
+      v.literal("deleteFiles"),
+      v.literal("readFiles"),
+      v.literal("listFiles")
+    ),
+    status: v.optional(
+      v.union(v.literal("running"), v.literal("done"), v.literal("error"))
+    ),
+    fileId: v.optional(v.id("files")),
+    fileIds: v.optional(v.array(v.id("files"))),
+    parentId: v.optional(v.id("files")),
+    name: v.optional(v.string()),
+    names: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    validateInternalKey(args.internalKey);
+
+    const { internalKey: _internalKey, ...event } = args;
+
+    const id = await ctx.db.insert("agentEvents", {
+      ...event,
+      createdAt: Date.now(),
+    });
+
+    return id;
+  },
+});
+
 export const createMessage = mutation({
   args: {
     internalKey: v.string(),

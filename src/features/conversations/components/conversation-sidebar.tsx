@@ -41,6 +41,8 @@ import {
   useMessages,
 } from "../hooks/use-conversations";
 
+import { AgentActivity } from "./agent-activity";
+
 import { Doc, Id } from "../../../../convex/_generated/dataModel";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { PastConversationsDialog } from "./past-conversations-dialog";
@@ -249,18 +251,32 @@ export const ConversationSidebar = ({
                 from={message.role}
               >
                 <MessageContent>
-                  {message.status === "processing" ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <LoaderIcon className="size-4 animate-spin" />
-                      <span>Thinking...</span>
-                    </div>
-                  ) : message.status === "cancelled" ? (
-                    <span className="text-muted-foreground italic">
-                      Request cancelled
-                    </span>
-                  ) : (
-                    <MessageResponse>{message.content}</MessageResponse>
-                  )}
+                  <div className={message.role === "assistant" ? "flex flex-col gap-2" : undefined}>
+                    {message.status === "processing" ? (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <LoaderIcon className="size-4 animate-spin" />
+                        <span>Thinking...</span>
+                      </div>
+                    ) : message.status === "cancelled" ? (
+                      <span className="text-muted-foreground italic">
+                        Request cancelled
+                      </span>
+                    ) : (
+                      <MessageResponse>{message.content}</MessageResponse>
+                    )}
+
+                    {message.role === "assistant" && (
+                      <AgentActivity
+                        projectId={projectId}
+                        messageId={
+                          message._id.startsWith("optimistic_")
+                            ? null
+                            : (message._id as Id<"messages">)
+                        }
+                        messageStatus={message.status}
+                      />
+                    )}
+                  </div>
                 </MessageContent>
                 {message.role === "assistant" &&
                   message.status === "completed" &&

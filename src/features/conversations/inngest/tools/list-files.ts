@@ -9,11 +9,15 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 interface ListFilesToolOptions {
   projectId: Id<"projects">;
   internalKey: string;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 export const createListFilesTool = ({
   projectId,
   internalKey,
+  conversationId,
+  messageId,
 }: ListFilesToolOptions) => {
   return createTool({
     name: "listFiles",
@@ -23,6 +27,15 @@ export const createListFilesTool = ({
     handler: async (_, { step: toolStep }) => {
       try {
         return await toolStep?.run("list-files", async () => {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "listFiles",
+            status: "running",
+          });
+
           const files = await convex.query(api.system.getProjectFiles, {
             internalKey,
             projectId,
@@ -43,9 +56,28 @@ export const createListFilesTool = ({
             parentId: f.parentId ?? null,
           }));
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "listFiles",
+            status: "done",
+          });
+
           return JSON.stringify(fileList);
         })
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "listFiles",
+            status: "error",
+          });
+        } catch {}
         return `Error listing files: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

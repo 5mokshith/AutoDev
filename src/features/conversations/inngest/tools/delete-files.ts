@@ -8,6 +8,9 @@ import { Id } from "../../../../../convex/_generated/dataModel";
 
 interface DeleteFilesToolOptions {
   internalKey: string;
+  projectId: Id<"projects">;
+  conversationId: Id<"conversations">;
+  messageId: Id<"messages">;
 }
 
 const paramsSchema = z.object({
@@ -18,6 +21,9 @@ const paramsSchema = z.object({
 
 export const createDeleteFilesTool = ({
   internalKey,
+  projectId,
+  conversationId,
+  messageId,
 }: DeleteFilesToolOptions) => {
   return createTool({
     name: "deleteFiles",
@@ -62,6 +68,17 @@ export const createDeleteFilesTool = ({
 
       try {
         return await toolStep?.run("delete-files", async () => {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "deleteFiles",
+            status: "running",
+            fileIds: filesToDelete.map((f) => f.id) as unknown as Id<"files">[],
+            names: filesToDelete.map((f) => f.name),
+          });
+
           const results: string[] = [];
 
           for (const file of filesToDelete) {
@@ -73,9 +90,32 @@ export const createDeleteFilesTool = ({
             results.push(`Deleted ${file.type} "${file.name}" successfully`);
           }
 
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "deleteFiles",
+            status: "done",
+            fileIds: filesToDelete.map((f) => f.id) as unknown as Id<"files">[],
+            names: filesToDelete.map((f) => f.name),
+          });
+
           return results.join("\n");
         });
       } catch (error) {
+        try {
+          await convex.mutation(api.system.createAgentEvent, {
+            internalKey,
+            projectId,
+            conversationId,
+            messageId,
+            type: "deleteFiles",
+            status: "error",
+            fileIds: filesToDelete.map((f) => f.id) as unknown as Id<"files">[],
+            names: filesToDelete.map((f) => f.name),
+          });
+        } catch {}
         return `Error deleting files: ${error instanceof Error ? error.message : "Unknown error"}`;
       }
     }

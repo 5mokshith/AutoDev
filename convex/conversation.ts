@@ -115,3 +115,34 @@ export const getMessages = query({
       .collect();
   },
 });
+
+export const getAgentEventsForMessage = query({
+  args: {
+    messageId: v.id("messages"),
+  },
+  handler: async (ctx, args) => {
+    const identity = await verifyAuth(ctx);
+
+    const message = await ctx.db.get("messages", args.messageId);
+
+    if (!message) {
+      throw new Error("Message not found");
+    }
+
+    const project = await ctx.db.get("projects", message.projectId);
+
+    if (!project) {
+      throw new Error("Project not found");
+    }
+
+    if (project.ownerId !== identity.subject) {
+      throw new Error("Unauthorized to access this project");
+    }
+
+    return await ctx.db
+      .query("agentEvents")
+      .withIndex("by_message", (q) => q.eq("messageId", args.messageId))
+      .order("asc")
+      .collect();
+  },
+});

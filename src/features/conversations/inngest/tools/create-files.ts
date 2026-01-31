@@ -12,7 +12,7 @@ interface CreateFilesToolOptions {
 }
 
 const paramsSchema = z.object({
-  parentId: z.string(),
+  parentId: z.string().optional().default(""),
   files: z
     .array(
       z.object({
@@ -34,6 +34,7 @@ export const createCreateFilesTool = ({
     parameters: z.object({
       parentId: z
         .string()
+        .optional()
         .describe(
           "The ID of the parent folder. Use empty string for root level. Must be a valid folder ID from listFiles."
         ),
@@ -76,24 +77,99 @@ export const createCreateFilesTool = ({
             }
           }
 
-          const results = await convex.mutation(api.system.createFiles, {
+          const projectFiles = await convex.query(api.system.getProjectFiles, {
             internalKey,
             projectId,
-            parentId: resolvedParentId,
-            files,
           });
 
-          const created = results.filter((r) => !r.error);
-          const failed = results.filter((r) => r.error);
+          const folderKey = (pid: Id<"files"> | undefined, name: string) =>
+            `${pid ?? "root"}::${name.toLowerCase()}`;
 
-          let response = `Created ${created.length} file(s)`;
-          if (created.length > 0) {
-            response += `: ${created.map((r) => r.name).join(", ")}`;
-          }
-          if (failed.length > 0) {
-            response += `. Failed: ${failed.map((r) => `${r.name} (${r.error})`).join(", ")}`;
+          const folderIdByKey = new Map<string, Id<"files">>();
+          for (const item of projectFiles) {
+            if (item.type !== "folder") continue;
+            folderIdByKey.set(folderKey(item.parentId, item.name), item._id);
           }
 
+          const groups = new Map<string, { parentId: Id<"files"> | undefined; files: { name: string; content: string }[] }>();
+
+          for (const file of files) {
+            const normalized = file.name
+              .trim()
+              .replace(/\\/g, "/")
+              .replace(/^\/+/, "")
+              .replace(/^\.\//, "");
+
+            const parts = normalized
+              .split("/")
+              .map((p) => p.trim())
+              .filter(Boolean);
+
+            if (parts.length === 0) {
+              continue;
+            }
+
+            const fileName = parts[parts.length - 1] ?? "";
+            const dirParts = parts.slice(0, -1);
+
+            let targetParentId: Id<"files"> | undefined = resolvedParentId;
+            for (const segment of dirParts) {
+              const key = folderKey(targetParentId, segment);
+              const existingFolderId = folderIdByKey.get(key);
+              if (existingFolderId) {
+                targetParentId = existingFolderId;
+                continue;
+              }
+
+              const createdFolderId = await convex.mutation(api.system.createFolder, {
+                internalKey,
+                projectId,
+                name: segment,
+                parentId: targetParentId,
+              });
+              folderIdByKey.set(key, createdFolderId as Id<"files">);
+              targetParentId = createdFolderId as Id<"files">;
+            }
+
+            const groupKey = targetParentId ?? "root";
+            const existingGroup = groups.get(groupKey);
+            if (existingGroup) {
+              existingGroup.files.push({ name: fileName, content: file.content });
+            } else {
+              groups.set(groupKey, {
+                parentId: targetParentId,
+                files: [{ name: fileName, content: file.content }],
+              });
+            }
+          }
+
+          const createdNames: string[] = [];
+          const failedNames: string[] = [];
+
+          for (const group of groups.values()) {
+            const results = await convex.mutation(api.system.createFiles, {
+              internalKey,
+              projectId,
+              parentId: group.parentId,
+              files: group.files,
+            });
+
+            for (const r of results) {
+              if (r.error) {
+                failedNames.push(`${r.name} (${r.error})`);
+              } else {
+                createdNames.push(r.name);
+              }
+            }
+          }
+
+          let response = `Created ${createdNames.length} file(s)`;
+          if (createdNames.length > 0) {
+            response += `: ${createdNames.join(", ")}`;
+          }
+          if (failedNames.length > 0) {
+            response += `. Failed: ${failedNames.join(", ")}`;
+          }
           return response;
         });
       } catch (error) {

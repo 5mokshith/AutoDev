@@ -4,11 +4,13 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 
 import { firecrawl } from "@/lib/firecrawl";
+import { AsyncTtlCache } from "@/lib/ai-cache";
 import {
   getLanguageModel,
   getQuickEditModelSelection,
   type AiSelection,
 } from "@/lib/ai-providers";
+import { sha256, truncateText, truncateTextMiddle, uniq } from "@/lib/prompt-utils";
 
 const quickEditSchema = z.object({
   editedCode: z
@@ -19,6 +21,34 @@ const quickEditSchema = z.object({
 });
 
 const URL_REGEX = /https?:\/\/[^\s)>\]]+/g;
+
+const quickEditCache = new AsyncTtlCache<{ editedCode: string }>();
+const scrapeCache = new AsyncTtlCache<string>();
+
+const QUICK_EDIT_MAX_URLS = Number.parseInt(
+  process.env.AUTODEV_QUICK_EDIT_MAX_URLS ?? "2",
+  10,
+);
+const QUICK_EDIT_MAX_DOC_CHARS_PER_URL = Number.parseInt(
+  process.env.AUTODEV_QUICK_EDIT_MAX_DOC_CHARS_PER_URL ?? "6000",
+  10,
+);
+const QUICK_EDIT_MAX_DOC_CHARS_TOTAL = Number.parseInt(
+  process.env.AUTODEV_QUICK_EDIT_MAX_DOC_CHARS_TOTAL ?? "12000",
+  10,
+);
+const QUICK_EDIT_MAX_SELECTED_CODE_CHARS = Number.parseInt(
+  process.env.AUTODEV_QUICK_EDIT_MAX_SELECTED_CODE_CHARS ?? "12000",
+  10,
+);
+const QUICK_EDIT_MAX_FULL_CODE_CHARS = Number.parseInt(
+  process.env.AUTODEV_QUICK_EDIT_MAX_FULL_CODE_CHARS ?? "24000",
+  10,
+);
+const QUICK_EDIT_MAX_INSTRUCTION_CHARS = Number.parseInt(
+  process.env.AUTODEV_QUICK_EDIT_MAX_INSTRUCTION_CHARS ?? "2000",
+  10,
+);
 
 const QUICK_EDIT_PROMPT = `You are a code editing assistant. Edit the selected code based on the user's instruction.
 
@@ -38,7 +68,8 @@ const QUICK_EDIT_PROMPT = `You are a code editing assistant. Edit the selected c
 </instruction>
 
 <instructions>
-Return ONLY the edited version of the selected code.
+Return a JSON object with exactly one key: "editedCode".
+The value must be ONLY the edited version of the selected code.
 Maintain the same indentation level as the original.
 Do not include any explanations or comments unless requested.
 If the instruction is unclear or cannot be applied, return the original code unchanged.
@@ -70,51 +101,101 @@ export async function POST(request: Request) {
       );
     }
 
-    const urls: string[] = instruction.match(URL_REGEX) || [];
+    const sanitizedSelectedCode = truncateText(
+      selectedCode,
+      Number.isFinite(QUICK_EDIT_MAX_SELECTED_CODE_CHARS)
+        ? QUICK_EDIT_MAX_SELECTED_CODE_CHARS
+        : 12000,
+    );
+    const sanitizedFullCode = truncateTextMiddle(
+      fullCode || "",
+      Number.isFinite(QUICK_EDIT_MAX_FULL_CODE_CHARS)
+        ? QUICK_EDIT_MAX_FULL_CODE_CHARS
+        : 24000,
+    );
+    const sanitizedInstruction = truncateText(
+      instruction,
+      Number.isFinite(QUICK_EDIT_MAX_INSTRUCTION_CHARS)
+        ? QUICK_EDIT_MAX_INSTRUCTION_CHARS
+        : 2000,
+    );
+
+    const rawUrls: string[] = instruction.match(URL_REGEX) || [];
+    const urls: string[] = uniq(rawUrls).slice(
+      0,
+      Number.isFinite(QUICK_EDIT_MAX_URLS) ? QUICK_EDIT_MAX_URLS : 2,
+    );
     let documentationContext = "";
 
     if (urls.length > 0) {
+      const maxCharsPerUrl = Number.isFinite(QUICK_EDIT_MAX_DOC_CHARS_PER_URL)
+        ? QUICK_EDIT_MAX_DOC_CHARS_PER_URL
+        : 6000;
+      const maxCharsTotal = Number.isFinite(QUICK_EDIT_MAX_DOC_CHARS_TOTAL)
+        ? QUICK_EDIT_MAX_DOC_CHARS_TOTAL
+        : 12000;
+
       const scrapedResults = await Promise.all(
         urls.map(async (url) => {
-          try {
-            const result = await firecrawl.scrape(url, {
-              formats: ["markdown"],
-            });
+          const cacheKey = `firecrawl:scrape:${url}`;
 
-            if (result.markdown) {
-              return `<doc url="${url}">\n${result.markdown}\n</doc>`;
+          return await scrapeCache.getOrSet(cacheKey, 60 * 60 * 1000, async () => {
+            try {
+              const result = await firecrawl.scrape(url, {
+                formats: ["markdown"],
+              });
+
+              if (!result.markdown) return "";
+              return truncateText(result.markdown, maxCharsPerUrl);
+            } catch {
+              return "";
             }
-
-            return null;
-          } catch {
-            return null;
-          }
-        })
+          });
+        }),
       );
 
-      const validResults = scrapedResults.filter(Boolean);
+      const docs = scrapedResults
+        .map((markdown, idx) => {
+          const url = urls[idx];
+          if (!markdown) return "";
+          return `<doc url="${url}">\n${markdown}\n</doc>`;
+        })
+        .filter(Boolean);
 
-      if (validResults.length > 0) {
-        documentationContext = `<documentation>\n${validResults.join("\n\n")}\n</documentation>`;
+      if (docs.length > 0) {
+        documentationContext = `<documentation>\n${truncateText(
+          docs.join("\n\n"),
+          maxCharsTotal,
+        )}\n</documentation>`;
       }
     }
 
     const prompt = QUICK_EDIT_PROMPT
-      .replace("{selectedCode}", selectedCode)
-      .replace("{fullCode}", fullCode || "")
-      .replace("{instruction}", instruction)
+      .replace("{selectedCode}", sanitizedSelectedCode)
+      .replace("{fullCode}", sanitizedFullCode)
+      .replace("{instruction}", sanitizedInstruction)
       .replace("{documentation}", documentationContext);
 
     const selection = getQuickEditModelSelection(ai as AiSelection | undefined);
     const model = getLanguageModel(selection);
 
-    const { output } = await generateText({
-      model,
-      output: Output.object({ schema: quickEditSchema }),
-      prompt,
+    const cacheKey = sha256(
+      JSON.stringify({ provider: selection.provider, model: selection.model, prompt }),
+    );
+
+    const { editedCode } = await quickEditCache.getOrSet(cacheKey, 30_000, async () => {
+      const { output } = await generateText({
+        model,
+        output: Output.object({ schema: quickEditSchema }),
+        prompt,
+        temperature: 0,
+        maxOutputTokens: 2048,
+      });
+
+      return { editedCode: output.editedCode };
     });
 
-    return NextResponse.json({ editedCode: output.editedCode });
+    return NextResponse.json({ editedCode });
   } catch (error) {
     console.error("Edit error:", error);
     return NextResponse.json(

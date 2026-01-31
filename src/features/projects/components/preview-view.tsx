@@ -36,6 +36,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   };
 
   const isLoading = status === "booting" || status === "installing";
+  const isWaiting = status === "waiting";
 
   return (
     <div className="h-full flex flex-col bg-background">
@@ -59,7 +60,8 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
             </div>
           )}
           {previewUrl && <span className="truncate">{previewUrl}</span>}
-          {!isLoading && !previewUrl && !error && <span>Ready to preview</span>}
+          {isWaiting && !previewUrl && !error && <span>Waiting for package.json...</span>}
+          {!isLoading && !isWaiting && !previewUrl && !error && <span>Ready to preview</span>}
         </div>
 
         <Button
@@ -99,6 +101,18 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                 <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
                   <Loader2Icon className="size-6 animate-spin" />
                   <p className="text-sm font-medium">Installing...</p>
+                </div>
+              </div>
+            )}
+
+            {isWaiting && !error && (
+              <div className="size-full flex items-center justify-center text-muted-foreground">
+                <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+                  <Loader2Icon className="size-6 animate-spin" />
+                  <p className="text-sm font-medium">Waiting for package.json...</p>
+                  <p className="text-xs text-muted-foreground">
+                    The preview will start automatically as soon as the AI generates a valid package.json.
+                  </p>
                 </div>
               </div>
             )}

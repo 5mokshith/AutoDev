@@ -20,6 +20,7 @@ import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 
 import { normalizeAiSelection, type AiSelection } from "@/lib/ai-selection";
+import { truncateText } from "@/lib/prompt-utils";
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -33,6 +34,16 @@ const CODING_MODEL = process.env.AUTODEV_GEMINI_CODING_MODEL ?? "gemini-2.5-flas
 const CODING_MAX_OUTPUT_TOKENS = Number.parseInt(
   process.env.AUTODEV_GEMINI_CODING_MAX_OUTPUT_TOKENS ?? "4096",
   10
+);
+
+const CODING_MAX_HISTORY_CHARS = Number.parseInt(
+  process.env.AUTODEV_CODING_MAX_HISTORY_CHARS ?? "9000",
+  10,
+);
+
+const CODING_AGENT_MAX_ITER = Number.parseInt(
+  process.env.AUTODEV_CODING_AGENT_MAX_ITER ?? "12",
+  10,
 );
 
 const getAgentKitModel = (
@@ -178,7 +189,12 @@ export const processMessage = inngest.createFunction(
         .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
         .join("\n\n");
 
-      systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
+      const maxHistoryChars = Number.isFinite(CODING_MAX_HISTORY_CHARS)
+        ? CODING_MAX_HISTORY_CHARS
+        : 9000;
+      const clippedHistory = truncateText(historyText, maxHistoryChars);
+
+      systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${clippedHistory}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
     }
 
     const sanitizeTitle = (raw: string) => {
@@ -272,7 +288,7 @@ export const processMessage = inngest.createFunction(
     const network = createNetwork({
       name: "AutoDev-network",
       agents: [codingAgent],
-      maxIter: 20,
+      maxIter: Number.isFinite(CODING_AGENT_MAX_ITER) ? CODING_AGENT_MAX_ITER : 12,
       router: ({ network }) => {
         const lastResult = network.state.results.at(-1);
         const hasTextResponse = lastResult?.output.some(
@@ -282,9 +298,14 @@ export const processMessage = inngest.createFunction(
           (m) => m.type === "tool_call"
         );
 
+        const hadAnyToolCallsEver = network.state.results.some((r) =>
+          r.output.some((m) => m.type === "tool_call")
+        );
+
         // Anthropic outputs text AND tool calls together
-        // Only stop if there's text WITHOUT tool calls (final response)
-        if (hasTextResponse && !hasToolCalls) {
+        // Only stop if there's text WITHOUT tool calls AFTER at least one tool call has happened.
+        // Otherwise, keep iterating so the agent gets a chance to use tools.
+        if (hasTextResponse && !hasToolCalls && hadAnyToolCallsEver) {
           return undefined;
         }
         return codingAgent;
@@ -318,20 +339,43 @@ export const processMessage = inngest.createFunction(
       return { success: false, messageId, conversationId };
     }
 
-    // Extract the assistant's text response from the last agent result
-    const lastResult = result.state.results.at(-1);
-    const textMessage = lastResult?.output.find(
-      (m) => m.type === "text" && m.role === "assistant"
-    );
-
     let assistantResponse =
       "I processed your request. Let me know if you need anything else!";
 
-    if (textMessage?.type === "text") {
+    for (let i = result.state.results.length - 1; i >= 0; i--) {
+      const r = result.state.results[i];
+      const textMessage = r.output.find(
+        (m) => m.type === "text" && m.role === "assistant"
+      );
+
+      if (textMessage?.type === "text") {
+        assistantResponse =
+          typeof textMessage.content === "string"
+            ? textMessage.content
+            : textMessage.content.map((c) => c.text).join("");
+        break;
+      }
+    }
+
+    const hadAnyToolCalls = result.state.results.some((r) =>
+      r.output.some((m) => m.type === "tool_call")
+    );
+
+    const projectFilesAfter = await step.run("check-project-files", async () => {
+      return await convex.query(api.system.getProjectFiles, {
+        internalKey,
+        projectId,
+      });
+    });
+
+    const createdAnyFiles = projectFilesAfter.length > 0;
+
+    if (!hadAnyToolCalls || !createdAnyFiles) {
       assistantResponse =
-        typeof textMessage.content === "string"
-          ? textMessage.content
-          : textMessage.content.map((c) => c.text).join("");
+        `No files were created for this project (projectId: ${projectId}). ` +
+        `toolCalls=${hadAnyToolCalls ? "yes" : "no"}, fileCount=${projectFilesAfter.length}. ` +
+        `This usually means the model did not call the file tools, or a tool call failed validation. ` +
+        `Try switching the model to one of: gpt-4o-mini, gpt-4o, qwen/qwen3-32b, openai/gpt-oss-20b, groq/compound-mini, then re-run the prompt.`;
     }
 
     // Update the assistant message with the response (this also sets status to completed)

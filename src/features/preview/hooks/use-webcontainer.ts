@@ -219,12 +219,16 @@ export const useWebContainer = ({
   settings,
 }: UseWebContainerProps) => {
   const [status, setStatus] = useState<
-    "idle" | "booting" | "installing" | "running" | "error"
+    "idle" | "booting" | "waiting" | "installing" | "running" | "error"
   >("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restartKey, setRestartKey] = useState(0);
   const [terminalOutput, setTerminalOutput] = useState("");
+
+  const appendOutput = useCallback((data: string) => {
+    setTerminalOutput((prev) => prev + data);
+  }, []);
 
   const containerRef = useRef<WebContainer | null>(null);
   const hasStartedRef = useRef(false);
@@ -238,13 +242,57 @@ export const useWebContainer = ({
   >(new Map());
   const pendingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncInFlightRef = useRef(false);
+  const pendingAutoRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const waitingRestartArmedRef = useRef(false);
   const serverReadyUnsubRef = useRef<null | (() => void)>(null);
   const projectRootRef = useRef<string>(".");
 
-  // Fetch files from Convex (auto-updates on changes)
+  const restart = useCallback((mode: "soft" | "hard" = "soft") => {
+    try {
+      installProcessRef.current?.kill?.();
+    } catch {}
+    try {
+      devProcessRef.current?.kill?.();
+    } catch {}
+
+    try {
+      serverReadyUnsubRef.current?.();
+    } catch {}
+    serverReadyUnsubRef.current = null;
+
+    if (pendingSyncTimerRef.current) {
+      clearTimeout(pendingSyncTimerRef.current);
+      pendingSyncTimerRef.current = null;
+    }
+    if (pendingAutoRestartTimerRef.current) {
+      clearTimeout(pendingAutoRestartTimerRef.current);
+      pendingAutoRestartTimerRef.current = null;
+    }
+    waitingRestartArmedRef.current = false;
+
+    cancelledRef.current = true;
+    serverReadyTokenRef.current++;
+
+    if (mode === "hard") {
+      teardownWebContainer();
+    }
+
+    containerRef.current = null;
+    hasStartedRef.current = false;
+    installProcessRef.current = null;
+    devProcessRef.current = null;
+    lastSyncedRef.current = new Map();
+    lastSyncedByIdRef.current = new Map();
+    setStatus("idle");
+    setPreviewUrl(null);
+    setError(null);
+    setRestartKey((k) => k + 1);
+  }, []);
+
   const files = useFiles(projectId);
 
-  // Initial boot and mount
   useEffect(() => {
     if (!enabled || !files || files.length === 0 || hasStartedRef.current) {
       return;
@@ -259,10 +307,6 @@ export const useWebContainer = ({
         setStatus("booting");
         setError(null);
         setTerminalOutput("");
-
-        const appendOutput = (data: string) => {
-          setTerminalOutput((prev) => prev + data);
-        };
 
         const container = await getWebContainer();
         containerRef.current = container;
@@ -346,9 +390,13 @@ export const useWebContainer = ({
         projectRootRef.current = projectRoot;
 
         if (!packageJsonFile || !packageJsonPath) {
-          throw new Error(
-            "No package.json found. If the model created a nested folder project, ensure a package.json exists inside it."
+          setStatus("waiting");
+          setPreviewUrl(null);
+          setError(null);
+          appendOutput(
+            "No package.json found yet. Waiting for the AI to generate package.json before starting the dev server...\n"
           );
+          return;
         }
 
         const packageJsonFsPath =
@@ -620,10 +668,27 @@ export const useWebContainer = ({
     settings?.installCommand,
   ]);
 
-  // Sync file changes (hot-reload)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || !files || status !== "running") return;
+    if (!enabled || !container || !files) return;
+
+    if (status === "waiting") {
+      const hasPackageJson = files.some(
+        (f) => f.type === "file" && f.name === "package.json" && !f.storageId
+      );
+
+      if (hasPackageJson && !waitingRestartArmedRef.current) {
+        waitingRestartArmedRef.current = true;
+        appendOutput("Detected package.json. Restarting preview...\n");
+
+        pendingAutoRestartTimerRef.current = setTimeout(() => {
+          waitingRestartArmedRef.current = false;
+          restart("soft");
+        }, 400);
+      }
+    } else {
+      waitingRestartArmedRef.current = false;
+    }
 
     if (pendingSyncTimerRef.current) {
       clearTimeout(pendingSyncTimerRef.current);
@@ -705,6 +770,64 @@ export const useWebContainer = ({
             lastSynced.set(next.path, next.updatedAt);
             lastSyncedById.set(id, { path: next.path, updatedAt: next.updatedAt });
           }
+
+          const packageJsonCandidates = files
+            .filter(
+              (f) =>
+                f.type === "file" &&
+                f.name === "package.json" &&
+                !f.storageId &&
+                typeof f.content === "string"
+            )
+            .map((f) => ({
+              file: f,
+              path: getFilePath(f, filesMap),
+            }))
+            .sort((a, b) => a.path.split("/").length - b.path.split("/").length);
+
+          const packageJson = packageJsonCandidates[0] ?? null;
+          const packageJsonFile = packageJson?.file ?? null;
+          const packageJsonPath = packageJson?.path ?? null;
+          const projectRoot = packageJsonPath ? getDirname(packageJsonPath) || "." : ".";
+
+          const lockFile = files.find((f) => {
+            if (
+              f.type !== "file" ||
+              f.storageId ||
+              typeof f.content !== "string" ||
+              !["package-lock.json", "pnpm-lock.yaml", "yarn.lock"].includes(f.name)
+            ) {
+              return false;
+            }
+
+            const lockPath = getFilePath(f, filesMap);
+            return getDirname(lockPath) === projectRoot;
+          });
+
+          const installSignature = `${packageJsonFile?.content ?? ""}\n${
+            typeof lockFile?.content === "string" ? lockFile.content : ""
+          }`;
+
+          if (
+            status !== "booting" &&
+            status !== "installing" &&
+            status !== "waiting" &&
+            store.installedSignature &&
+            installSignature.trim().length > 0 &&
+            store.installedSignature !== installSignature
+          ) {
+            if (pendingAutoRestartTimerRef.current) {
+              clearTimeout(pendingAutoRestartTimerRef.current);
+              pendingAutoRestartTimerRef.current = null;
+            }
+
+            pendingAutoRestartTimerRef.current = setTimeout(() => {
+              appendOutput(
+                "Detected package.json change. Running install and restarting dev server...\n"
+              );
+              restart("soft");
+            }, 1200);
+          }
         } finally {
           syncInFlightRef.current = false;
         }
@@ -730,39 +853,6 @@ export const useWebContainer = ({
       setError(null);
     }
   }, [enabled]);
-
-  // Restart the entire WebContainer process
-  const restart = useCallback((mode: "soft" | "hard" = "soft") => {
-    try {
-      installProcessRef.current?.kill?.();
-    } catch {}
-    try {
-      devProcessRef.current?.kill?.();
-    } catch {}
-
-    try {
-      serverReadyUnsubRef.current?.();
-    } catch {}
-    serverReadyUnsubRef.current = null;
-
-    cancelledRef.current = true;
-    serverReadyTokenRef.current++;
-
-    if (mode === "hard") {
-      teardownWebContainer();
-    }
-
-    containerRef.current = null;
-    hasStartedRef.current = false;
-    installProcessRef.current = null;
-    devProcessRef.current = null;
-    lastSyncedRef.current = new Map();
-    lastSyncedByIdRef.current = new Map();
-    setStatus("idle");
-    setPreviewUrl(null);
-    setError(null);
-    setRestartKey((k) => k + 1);
-  }, []);
 
   return {
     status,

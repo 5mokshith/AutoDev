@@ -66,7 +66,11 @@ export const createCreateFolderTool = ({
             parentId: parentId ? (parentId as Id<"files">) : undefined,
           });
 
-          return `Folder created with ID: ${folderId}`;
+          return JSON.stringify({
+            folderId,
+            name,
+            parentId: parentId || "",
+          });
         });
       } catch (error) {
         return `Error creating folder: ${error instanceof Error ? error.message : "Unknown error"}`;

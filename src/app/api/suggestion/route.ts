@@ -7,6 +7,8 @@ import {
   getLanguageModel,
   type AiSelection,
 } from "@/lib/ai-providers";
+import { AsyncTtlCache } from "@/lib/ai-cache";
+import { sha256, truncateText, truncateTextMiddle } from "@/lib/prompt-utils";
 
 const suggestionSchema = z.object({
   suggestion: z
@@ -15,6 +17,17 @@ const suggestionSchema = z.object({
       "The code to insert at cursor, or empty string if no completion needed"
     ),
 });
+
+const suggestionCache = new AsyncTtlCache<{ suggestion: string }>();
+
+const SUGGESTION_MAX_CODE_CHARS = Number.parseInt(
+  process.env.AUTODEV_SUGGESTION_MAX_CODE_CHARS ?? "18000",
+  10,
+);
+const SUGGESTION_MAX_CONTEXT_CHARS = Number.parseInt(
+  process.env.AUTODEV_SUGGESTION_MAX_CONTEXT_CHARS ?? "4000",
+  10,
+);
 
 const SUGGESTION_PROMPT = `You are a code suggestion assistant.
 
@@ -44,6 +57,8 @@ Follow these steps IN ORDER:
 3. Only if steps 1 and 2 don't apply: suggest what should be typed at the cursor position, using context from full_code.
 
 Your suggestion is inserted immediately after the cursor, so never suggest code that's already in the file.
+Return a JSON object with exactly one key: "suggestion".
+The value should be a string of code to insert, or an empty string.
 </instructions>`;
 
 export async function POST(request: Request) {
@@ -76,26 +91,53 @@ export async function POST(request: Request) {
       );
     }
 
+    const sanitizedCode = truncateTextMiddle(
+      code,
+      Number.isFinite(SUGGESTION_MAX_CODE_CHARS) ? SUGGESTION_MAX_CODE_CHARS : 18000,
+    );
+    const sanitizedPreviousLines = truncateText(
+      previousLines || "",
+      Number.isFinite(SUGGESTION_MAX_CONTEXT_CHARS)
+        ? SUGGESTION_MAX_CONTEXT_CHARS
+        : 4000,
+    );
+    const sanitizedNextLines = truncateText(
+      nextLines || "",
+      Number.isFinite(SUGGESTION_MAX_CONTEXT_CHARS)
+        ? SUGGESTION_MAX_CONTEXT_CHARS
+        : 4000,
+    );
+
     const prompt = SUGGESTION_PROMPT
       .replace("{fileName}", fileName)
-      .replace("{code}", code)
+      .replace("{code}", sanitizedCode)
       .replace("{currentLine}", currentLine)
-      .replace("{previousLines}", previousLines || "")
+      .replace("{previousLines}", sanitizedPreviousLines)
       .replace("{textBeforeCursor}", textBeforeCursor)
       .replace("{textAfterCursor}", textAfterCursor)
-      .replace("{nextLines}", nextLines || "")
+      .replace("{nextLines}", sanitizedNextLines)
       .replace("{lineNumber}", lineNumber.toString());
 
     const selection = getCodingModelSelection(ai as AiSelection | undefined);
     const model = getLanguageModel(selection);
 
-    const { output } = await generateText({
-      model,
-      output: Output.object({ schema: suggestionSchema }),
-      prompt,
+    const cacheKey = sha256(
+      JSON.stringify({ provider: selection.provider, model: selection.model, prompt }),
+    );
+
+    const { suggestion } = await suggestionCache.getOrSet(cacheKey, 15_000, async () => {
+      const { output } = await generateText({
+        model,
+        output: Output.object({ schema: suggestionSchema }),
+        prompt,
+        temperature: 0.2,
+        maxOutputTokens: 256,
+      });
+
+      return { suggestion: output.suggestion };
     });
 
-    return NextResponse.json({ suggestion: output.suggestion })
+    return NextResponse.json({ suggestion })
   } catch (error) {
     console.error("Suggestion error: ", error);
     return NextResponse.json(

@@ -3,6 +3,9 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { verifyAuth } from "./auth";
 
+const isDevAnonymousIdentity = (subject: string) =>
+  process.env.NODE_ENV !== "production" && subject === "anonymous";
+
 export const updateSettings = mutation({
   args: {
     id: v.id("projects"),
@@ -20,7 +23,7 @@ export const updateSettings = mutation({
       throw new Error("Project not found");
     }
 
-    if (project.ownerId !== identity.subject) {
+    if (project.ownerId !== identity.subject && !isDevAnonymousIdentity(identity.subject)) {
       throw new Error("Unauthorized to update this project");
     }
 
@@ -89,7 +92,7 @@ export const getById = query({
       throw new Error("Project not found");
     }
 
-    if (project.ownerId !== identity.subject) {
+    if (project.ownerId !== identity.subject && !isDevAnonymousIdentity(identity.subject)) {
       throw new Error("Unauthorized access to this project");
     }
 
@@ -111,7 +114,7 @@ export const rename = mutation({
       throw new Error("Project not found");
     }
 
-    if (project.ownerId !== identity.subject) {
+    if (project.ownerId !== identity.subject && !isDevAnonymousIdentity(identity.subject)) {
       throw new Error("Unauthorized access to this project");
     }
 

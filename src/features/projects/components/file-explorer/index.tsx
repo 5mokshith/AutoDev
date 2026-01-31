@@ -120,6 +120,11 @@ export const FileExplorer = ({
                 onCancel={() => setCreating(null)}
               />
             )}
+            {rootFiles && rootFiles.length === 0 && !creating && (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                No files yet
+              </div>
+            )}
             {rootFiles?.map((item) => (
               <Tree
                 key={`${item._id}-${collapseKey}`}

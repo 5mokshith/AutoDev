@@ -174,11 +174,40 @@ export const processMessage = inngest.createFunction(
     );
 
     if (contextMessages.length > 0) {
-      const historyText = contextMessages
-        .map((msg) => `${msg.role.toUpperCase()}: ${msg.content}`)
-        .join("\n\n");
+      const MAX_CONTEXT_CHARS = 3000;
+      const MAX_MESSAGE_CHARS = 700;
+      const recentUserMessages = contextMessages
+        .filter((m) => m.role === "user")
+        .slice(-5);
 
-      systemPrompt += `\n\n## Previous Conversation (for context only - do NOT repeat these responses):\n${historyText}\n\n## Current Request:\nRespond ONLY to the user's new message below. Do not repeat or reference your previous responses.`;
+      const recentAssistantMessages = contextMessages
+        .filter((m) => m.role === "assistant")
+        .slice(-2);
+
+      const formatMsg = (label: string, content: string) => {
+        const trimmed = content.trim();
+        const clipped =
+          trimmed.length > MAX_MESSAGE_CHARS
+            ? `${trimmed.slice(0, MAX_MESSAGE_CHARS)}\n…(truncated)`
+            : trimmed;
+        return `${label}: ${clipped}`;
+      };
+
+      const blocks: string[] = [];
+      for (const m of recentUserMessages) {
+        blocks.push(formatMsg("USER", m.content));
+      }
+      for (const m of recentAssistantMessages) {
+        blocks.push(formatMsg("ASSISTANT", m.content));
+      }
+
+      const combined = blocks.join("\n\n");
+      const clippedContext =
+        combined.length > MAX_CONTEXT_CHARS
+          ? `${combined.slice(0, MAX_CONTEXT_CHARS)}\n…(truncated)`
+          : combined;
+
+      systemPrompt += `\n\n## Conversation Context (background only)\n${clippedContext}`;
     }
 
     const sanitizeTitle = (raw: string) => {

@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { sanitizeGeminiParams } from "../utils/gemini-sanitizer";
 
 interface CreateFilesToolOptions {
   projectId: Id<"projects">;
@@ -15,25 +16,28 @@ interface CreateFilesToolOptions {
 }
 
 const coerceToolParams = (params: unknown) => {
-  if (typeof params === "string") {
+  // First, sanitize Gemini-specific issues
+  const sanitized = sanitizeGeminiParams(params);
+  
+  if (typeof sanitized === "string") {
     try {
-      return JSON.parse(params) as unknown;
+      return JSON.parse(sanitized) as unknown;
     } catch {
       // Try to fix common Gemini JSON issues
       try {
         // Fix unquoted string values in object notation
         // Pattern: {key: value} -> {key: "value"}
-        let fixed = params
+        let fixed = sanitized
           .replace(/\{(\w+):\s*([^",\{\}\[\]]+)/g, '{"$1": "$2"')
           .replace(/,\s*(\w+):\s*([^",\{\}\[\]]+)/g, ', "$1": "$2"');
         return JSON.parse(fixed) as unknown;
       } catch {
-        return params;
+        return sanitized;
       }
     }
   }
 
-  return params;
+  return sanitized;
 };
 
 const nullableString = () =>

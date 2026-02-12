@@ -5,6 +5,7 @@ import { convex } from "@/lib/convex-client";
 
 import { api } from "../../../../../convex/_generated/api";
 import { Id } from "../../../../../convex/_generated/dataModel";
+import { sanitizeGeminiParams } from "../utils/gemini-sanitizer";
 
 interface UpdateFileToolOptions {
   internalKey: string;
@@ -32,7 +33,9 @@ export const createUpdateFileTool = ({
       content: z.string().describe("Complete new file content as a properly escaped JSON string. Use \\n for line breaks. Escape all quotes with backslash (\\\" for double quotes)."),
     }),
     handler: async (params, { step: toolStep }) => {
-      const parsed = paramsSchema.safeParse(params);
+      // Sanitize Gemini params
+      const sanitized = sanitizeGeminiParams(params);
+      const parsed = paramsSchema.safeParse(sanitized);
       if (!parsed.success) {
         return `Error: ${parsed.error.issues[0].message}`;
       }

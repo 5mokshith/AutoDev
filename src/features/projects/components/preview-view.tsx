@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Allotment } from "allotment";
 import {
   Loader2Icon,
@@ -22,6 +22,9 @@ import { Id } from "../../../../convex/_generated/dataModel";
 export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
   const project = useProject(projectId);
   const [showTerminal, setShowTerminal] = useState(true);
+  const [iframeState, setIframeState] = useState<
+    "idle" | "loading" | "loaded" | "error" | "timeout"
+  >("idle");
 
   const {
     status, previewUrl, error, restart, terminalOutput
@@ -35,7 +38,36 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
     restart();
   };
 
-  const isLoading = status === "booting" || status === "installing";
+  useEffect(() => {
+    if (!previewUrl) {
+      setIframeState("idle");
+      return;
+    }
+
+    setIframeState("loading");
+    const timeout = setTimeout(() => {
+      setIframeState((current) => (current === "loaded" ? current : "timeout"));
+    }, 10_000);
+
+    return () => clearTimeout(timeout);
+  }, [previewUrl]);
+
+  const isLoading =
+    status === "booting" ||
+    status === "preparing" ||
+    status === "installing" ||
+    status === "starting";
+
+  const loadingLabel =
+    status === "booting"
+      ? "Starting..."
+      : status === "preparing"
+        ? "Preparing preview..."
+        : status === "installing"
+          ? "Installing..."
+          : status === "starting"
+            ? "Starting server..."
+            : "";
 
   return (
     <div className="h-full flex flex-col bg-background">
@@ -55,7 +87,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
           {isLoading && (
             <div className="flex items-center gap-1.5">
               <Loader2Icon className="size-3 animate-spin" />
-              {status === "booting" ? "Starting..." : "Installing..."}
+              {loadingLabel}
             </div>
           )}
           {previewUrl && <span className="truncate">{previewUrl}</span>}
@@ -94,11 +126,31 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
               </div>
             )}
 
-            {isLoading && !error && (
+            {!error && previewUrl && (iframeState === "error" || iframeState === "timeout") && (
+              <div className="size-full flex items-center justify-center text-muted-foreground">
+                <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
+                  <AlertTriangleIcon className="size-6" />
+                  <p className="text-sm font-medium">
+                    {iframeState === "timeout"
+                      ? "Preview is taking too long to load (blank screen)."
+                      : "Preview failed to load."}
+                  </p>
+                  <p className="text-xs">
+                    Check the terminal output below for runtime errors, or restart the container.
+                  </p>
+                  <Button size="sm" variant="outline" onClick={handleRestart}>
+                    <RefreshCwIcon className="size-4" />
+                    Restart
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {isLoading && !error && !previewUrl && (
               <div className="size-full flex items-center justify-center text-muted-foreground">
                 <div className="flex flex-col items-center gap-2 max-w-md mx-auto text-center">
                   <Loader2Icon className="size-6 animate-spin" />
-                  <p className="text-sm font-medium">Installing...</p>
+                  <p className="text-sm font-medium">{loadingLabel}</p>
                 </div>
               </div>
             )}
@@ -108,6 +160,8 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
                 src={previewUrl}
                 className="size-full border-0"
                 title="Preview"
+                onLoad={() => setIframeState("loaded")}
+                onError={() => setIframeState("error")}
               />
             )}
           </Allotment.Pane>

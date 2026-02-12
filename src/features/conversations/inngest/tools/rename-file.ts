@@ -18,6 +18,22 @@ const paramsSchema = z.object({
   newName: z.string().min(1, "New name is required"),
 });
 
+const getBasename = (path: string) => {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? "";
+};
+
+const isValidSegment = (segment: string) => {
+  if (!segment) return false;
+  const trimmed = segment.trim();
+  if (!trimmed) return false;
+  if (trimmed === "." || trimmed === "..") return false;
+  if (trimmed.includes("/") || trimmed.includes("\\")) return false;
+  if (trimmed.includes("\u0000")) return false;
+  return true;
+};
+
 export const createRenameFileTool = ({
   internalKey,
   projectId,
@@ -38,6 +54,11 @@ export const createRenameFileTool = ({
       }
 
       const { fileId, newName } = parsed.data;
+
+      const normalizedNewName = getBasename(newName).trim();
+      if (!isValidSegment(normalizedNewName)) {
+        return `Error: Invalid name "${newName}". Provide a file/folder name (not a path), without "/" or "\\".`;
+      }
 
       // Validate file exists before running the step
       const file = await convex.query(api.system.getFileById, {
@@ -66,7 +87,7 @@ export const createRenameFileTool = ({
           await convex.mutation(api.system.renameFile, {
             internalKey,
             fileId: fileId as Id<"files">,
-            newName,
+            newName: normalizedNewName,
           });
 
           await convex.mutation(api.system.createAgentEvent, {
@@ -81,7 +102,7 @@ export const createRenameFileTool = ({
             names: [file.name],
           });
 
-          return `Renamed "${file.name}" to "${newName}" successfully`;        
+          return `Renamed "${file.name}" to "${normalizedNewName}" successfully`;        
         })
       } catch (error) {
         try {
@@ -93,7 +114,7 @@ export const createRenameFileTool = ({
             type: "renameFile",
             status: "error",
             fileId: fileId as Id<"files">,
-            name: newName,
+            name: normalizedNewName,
             names: [file.name],
           });
         } catch {}

@@ -31,6 +31,23 @@ const paramsSchema = z.object({
   parentId: z.preprocess((v) => (v == null ? "" : v), z.string()),
 });
 
+const splitSegments = (input: string) =>
+  input
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const isValidSegment = (segment: string) => {
+  if (!segment) return false;
+  const trimmed = segment.trim();
+  if (!trimmed) return false;
+  if (trimmed === "." || trimmed === "..") return false;
+  if (trimmed.includes("/") || trimmed.includes("\\")) return false;
+  if (trimmed.includes("\u0000")) return false;
+  return true;
+};
+
 export const createCreateFolderTool = ({
   projectId,
   internalKey,
@@ -71,8 +88,31 @@ export const createCreateFolderTool = ({
 
       const { name, parentId } = parsed.data;
 
+      const segments = splitSegments(name);
+      if (segments.length === 0) {
+        return `Error: Invalid folder name "${name}"`;
+      }
+      const invalid = segments.find((s) => !isValidSegment(s));
+      if (invalid) {
+        return `Error: Invalid folder name segment "${invalid}"`;
+      }
+
       try {
         return await toolStep?.run("create-folder", async () => {
+          const allProjectFiles = await convex.query(api.system.getProjectFiles, {
+            internalKey,
+            projectId,
+          });
+
+          const folderKey = (pid: Id<"files"> | undefined, folderName: string) =>
+            `${pid ?? ""}:${folderName.toLowerCase()}`;
+
+          const foldersByKey = new Map<string, Id<"files">>();
+          for (const f of allProjectFiles) {
+            if (f.type !== "folder") continue;
+            foldersByKey.set(folderKey(f.parentId, f.name), f._id as Id<"files">);
+          }
+
           // Validate parentId if provided
           if (parentId) {
             try {
@@ -91,37 +131,86 @@ export const createCreateFolderTool = ({
             }
           }
 
-          await convex.mutation(api.system.createAgentEvent, {
-            internalKey,
-            projectId,
-            conversationId,
-            messageId,
-            type: "createFolder",
-            status: "running",
-            parentId: parentId ? (parentId as Id<"files">) : undefined,
-            name,
-          }).catch(() => {});
+          await convex
+            .mutation(api.system.createAgentEvent, {
+              internalKey,
+              projectId,
+              conversationId,
+              messageId,
+              type: "createFolder",
+              status: "running",
+              parentId: parentId ? (parentId as Id<"files">) : undefined,
+              name,
+            })
+            .catch(() => {});
 
-          const folderId = await convex.mutation(api.system.createFolder, {
-            internalKey,
-            projectId,
-            name,
-            parentId: parentId ? (parentId as Id<"files">) : undefined,
-          });
+          let currentParentId: Id<"files"> | undefined = parentId
+            ? (parentId as Id<"files">)
+            : undefined;
+          let folderId: Id<"files"> | null = null;
 
-          await convex.mutation(api.system.createAgentEvent, {
-            internalKey,
-            projectId,
-            conversationId,
-            messageId,
-            type: "createFolder",
-            status: "done",
-            parentId: parentId ? (parentId as Id<"files">) : undefined,
-            fileId: folderId as unknown as Id<"files">,
-            name,
-          }).catch(() => {});
+          for (const segment of segments) {
+            const key = folderKey(currentParentId, segment);
+            const existing = foldersByKey.get(key);
+            if (existing) {
+              folderId = existing;
+              currentParentId = folderId;
+              continue;
+            }
 
-          return `Folder created with ID: ${folderId}`;
+            try {
+              folderId = (await convex.mutation(api.system.createFolder, {
+                internalKey,
+                projectId,
+                name: segment,
+                parentId: currentParentId,
+              })) as unknown as Id<"files">;
+              foldersByKey.set(key, folderId);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "";
+              if (message.includes("Folder already exists")) {
+                const resolved = foldersByKey.get(key);
+                if (resolved) {
+                  folderId = resolved;
+                } else {
+                  const refresh = await convex.query(api.system.getProjectFiles, {
+                    internalKey,
+                    projectId,
+                  });
+                  const found = refresh.find(
+                    (f) =>
+                      f.type === "folder" &&
+                      String(f.parentId ?? "") === String(currentParentId ?? "") &&
+                      f.name.toLowerCase() === segment.toLowerCase()
+                  );
+                  if (!found) {
+                    throw err;
+                  }
+                  folderId = found._id as Id<"files">;
+                  foldersByKey.set(key, folderId);
+                }
+              } else {
+                throw err;
+              }
+            }
+            currentParentId = folderId;
+          }
+
+          await convex
+            .mutation(api.system.createAgentEvent, {
+              internalKey,
+              projectId,
+              conversationId,
+              messageId,
+              type: "createFolder",
+              status: "done",
+              parentId: parentId ? (parentId as Id<"files">) : undefined,
+              fileId: folderId ?? undefined,
+              name,
+            })
+            .catch(() => {});
+
+          return folderId ? `Folder created with ID: ${folderId}` : "Error: Failed to create folder";
         });
       } catch (error) {
         try {

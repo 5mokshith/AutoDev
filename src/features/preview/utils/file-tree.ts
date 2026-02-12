@@ -11,6 +11,31 @@ export const buildFileTree = (files: FileDoc[]): FileSystemTree => {
   const tree: FileSystemTree = {};
   const filesMap = new Map(files.map((f) => [f._id, f]));
 
+  const shouldAutofixCvaImport = (pathParts: string[], content: string) => {
+    const fileName = pathParts[pathParts.length - 1] ?? "";
+    const extMatch = fileName.match(/\.(tsx?|jsx?)$/i);
+    if (!extMatch) return false;
+    if (!content.includes("cva(")) return false;
+    if (content.includes("class-variance-authority")) return false;
+    return true;
+  };
+
+  const injectCvaImport = (content: string) => {
+    const importLine = 'import { cva } from "class-variance-authority";';
+    const lines = content.split(/\r?\n/);
+
+    let insertAt = 0;
+    if (lines[0]?.trim() === '"use client";' || lines[0]?.trim() === "'use client';") {
+      insertAt = 1;
+      if (lines[1]?.trim() === "") {
+        insertAt = 2;
+      }
+    }
+
+    lines.splice(insertAt, 0, importLine);
+    return lines.join("\n");
+  };
+
   const splitSegments = (name: string): string[] =>
     name
       .replace(/\\/g, "/")
@@ -49,7 +74,13 @@ export const buildFileTree = (files: FileDoc[]): FileSystemTree => {
             current[part] = { directory: {} };
           }
         } else if (!file.storageId && file.content !== undefined) {
-          current[part] = { file: { contents: file.content } };
+          const content =
+            typeof file.content === "string" &&
+            shouldAutofixCvaImport(pathParts, file.content)
+              ? injectCvaImport(file.content)
+              : file.content;
+
+          current[part] = { file: { contents: content } };
         }
       } else {
         const existing = current[part];

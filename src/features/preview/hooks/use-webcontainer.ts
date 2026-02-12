@@ -213,13 +213,15 @@ const fixNestedNodeScriptPath = (
   return script;
 };
 
+const DEV_SERVER_READY_TIMEOUT_MS = 60_000;
+
 export const useWebContainer = ({
   projectId,
   enabled,
   settings,
 }: UseWebContainerProps) => {
   const [status, setStatus] = useState<
-    "idle" | "booting" | "installing" | "running" | "error"
+    "idle" | "booting" | "preparing" | "installing" | "starting" | "running" | "error"
   >("idle");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +230,7 @@ export const useWebContainer = ({
 
   const containerRef = useRef<WebContainer | null>(null);
   const hasStartedRef = useRef(false);
+  const startedProjectIdRef = useRef<string | null>(null);
   const devProcessRef = useRef<{ kill?: () => void } | null>(null);
   const installProcessRef = useRef<{ kill?: () => void } | null>(null);
   const cancelledRef = useRef(false);
@@ -236,21 +239,30 @@ export const useWebContainer = ({
   const lastSyncedByIdRef = useRef<
     Map<string, { path: string; updatedAt: number }>
   >(new Map());
+  const filesRef = useRef<ReturnType<typeof useFiles> | null>(null);
   const pendingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncInFlightRef = useRef(false);
   const serverReadyUnsubRef = useRef<null | (() => void)>(null);
   const projectRootRef = useRef<string>(".");
+  const lastDependencySignatureRef = useRef<string | null>(null);
 
   // Fetch files from Convex (auto-updates on changes)
   const files = useFiles(projectId);
 
+  useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
   // Initial boot and mount
   useEffect(() => {
-    if (!enabled || !files || files.length === 0 || hasStartedRef.current) {
+    const isSameProject = startedProjectIdRef.current === String(projectId);
+    const filesSnapshot = filesRef.current;
+    if (!enabled || !filesSnapshot || filesSnapshot.length === 0 || (hasStartedRef.current && isSameProject)) {
       return;
     }
 
     hasStartedRef.current = true;
+    startedProjectIdRef.current = String(projectId);
     cancelledRef.current = false;
     const serverReadyToken = ++serverReadyTokenRef.current;
 
@@ -259,6 +271,7 @@ export const useWebContainer = ({
         setStatus("booting");
         setError(null);
         setTerminalOutput("");
+        setPreviewUrl(null);
 
         const appendOutput = (data: string) => {
           setTerminalOutput((prev) => prev + data);
@@ -282,13 +295,14 @@ export const useWebContainer = ({
         installProcessRef.current = null;
         devProcessRef.current = null;
 
-        const filesMap = new Map(files.map((f) => [f._id, f]));
+        const runFiles = filesSnapshot;
+        const filesMap = new Map(runFiles.map((f) => [f._id, f]));
 
         {
           const invalidPaths: string[] = [];
           const collisions = new Map<string, string>();
 
-          for (const file of files) {
+          for (const file of runFiles) {
             const relPath = getFilePath(file, filesMap as unknown as Map<Id<"files">, typeof file>);
             const segments = relPath.split("/");
             if (segments.some((s) => !isValidPathSegment(s))) {
@@ -315,7 +329,7 @@ export const useWebContainer = ({
 
         if (store.mountedProjectId !== projectId) {
           await clearWorkdir(container);
-          const fileTree = buildFileTree(files);
+          const fileTree = buildFileTree(runFiles);
           await container.mount(fileTree);
           store.mountedProjectId = projectId;
           store.installedSignature = null;
@@ -324,7 +338,9 @@ export const useWebContainer = ({
           lastSyncedByIdRef.current = new Map();
         }
 
-        const packageJsonCandidates = files
+        setStatus("preparing");
+
+        const packageJsonCandidates = runFiles
           .filter(
             (f) =>
               f.type === "file" &&
@@ -405,14 +421,22 @@ export const useWebContainer = ({
           } catch {}
         }
 
+        let serverReadyTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
         serverReadyUnsubRef.current = container.on("server-ready", (_port, url) => {
           if (cancelledRef.current) return;
           if (serverReadyTokenRef.current !== serverReadyToken) return;
+
+          if (serverReadyTimeoutId) {
+            clearTimeout(serverReadyTimeoutId);
+            serverReadyTimeoutId = null;
+          }
+
           setPreviewUrl(url);
           setStatus("running");
         });
 
-        const lockFile = files.find((f) => {
+        const lockFile = runFiles.find((f) => {
           if (
             f.type !== "file" ||
             f.storageId ||
@@ -479,6 +503,8 @@ export const useWebContainer = ({
           appendOutput(`$ ${getInstallCommandFor(pkgManager)} (cached)\n`);
         }
 
+        setStatus("starting");
+
         // Parse dev command
         // If settings aren't provided, choose the best default based on package.json scripts.
         const devCmdFromSettings = (settings?.devCommand || "").trim();
@@ -490,7 +516,7 @@ export const useWebContainer = ({
         let devCmd = isLegacyHardcodedWebpackCmd ? "" : devCmdFromSettings;
 
         const projectFilesLower = new Set(
-          files
+          runFiles
             .filter((f) => f.type === "file")
             .map((f) =>
               getFilePath(
@@ -532,6 +558,38 @@ export const useWebContainer = ({
           }
         }
 
+        const ensureDevWrapper = async () => {
+          const parts = splitCommand(devCmd);
+          if (parts.length < 2) return;
+          if (parts[0] !== "node") return;
+          const scriptArg = parts[1] ?? "";
+          if (!scriptArg.endsWith("scripts/dev.js")) return;
+
+          const wrapperPath = projectRoot === "." ? "scripts/dev.js" : `${projectRoot}/scripts/dev.js`;
+
+          try {
+            await container.fs.readFile(wrapperPath, "utf8");
+            return;
+          } catch {}
+
+          const wrapper =
+            isNextProject
+              ? "const { spawn } = require('node:child_process');\n\nconst args = process.argv.slice(2);\nconst filtered = args.filter(a => a !== '--webpack');\nconst child = spawn('next', ['dev', ...filtered, '--webpack'], { stdio: 'inherit' });\nchild.on('exit', (code) => process.exit(code ?? 0));\n"
+              : isViteProject
+                ? "const { spawn } = require('node:child_process');\n\nconst args = process.argv.slice(2);\nconst child = spawn('vite', [...args], { stdio: 'inherit' });\nchild.on('exit', (code) => process.exit(code ?? 0));\n"
+                : "const { spawn } = require('node:child_process');\n\nconst args = process.argv.slice(2);\nconst child = spawn('npm', ['run', 'dev', ...(args.length ? ['--', ...args] : [])], { stdio: 'inherit' });\nchild.on('exit', (code) => process.exit(code ?? 0));\n";
+
+          try {
+            const dir = projectRoot === "." ? "scripts" : `${projectRoot}/scripts`;
+            await container.fs.mkdir(dir, { recursive: true });
+          } catch {}
+
+          await container.fs.writeFile(wrapperPath, wrapper);
+          appendOutput(`\n[!] Missing ${wrapperPath} — created a temporary dev wrapper for preview\n`);
+        };
+
+        await ensureDevWrapper();
+
         const ensureDevFlag = (cmd: string, flag: string) => {
           const parts = splitCommand(cmd);
           if (parts.includes(flag)) return cmd;
@@ -566,6 +624,23 @@ export const useWebContainer = ({
 
         const [devBin, ...devArgs] = splitCommand(devCmd);
         appendOutput(`\n$ ${devCmd}\n`);
+
+        serverReadyTimeoutId = setTimeout(() => {
+          if (cancelledRef.current) return;
+          if (serverReadyTokenRef.current !== serverReadyToken) return;
+          appendOutput(
+            `\n[!] Dev server hasn’t emitted server-ready within ${Math.round(
+              DEV_SERVER_READY_TIMEOUT_MS / 1000
+            )}s — check logs above\n`
+          );
+          setError(
+            `Dev server did not become ready within ${Math.round(
+              DEV_SERVER_READY_TIMEOUT_MS / 1000
+            )}s`
+          );
+          setStatus("error");
+        }, DEV_SERVER_READY_TIMEOUT_MS);
+
         const devProcess = await container.spawn(devBin, devArgs, {
           cwd: projectRoot,
           env: {
@@ -588,6 +663,12 @@ export const useWebContainer = ({
         void devProcess.exit.then((code) => {
           if (cancelledRef.current) return;
           if (serverReadyTokenRef.current !== serverReadyToken) return;
+
+          if (serverReadyTimeoutId) {
+            clearTimeout(serverReadyTimeoutId);
+            serverReadyTimeoutId = null;
+          }
+
           if (code === 0) return;
 
           setError(`Dev process exited with code ${code}`);
@@ -614,10 +695,11 @@ export const useWebContainer = ({
     };
   }, [
     enabled,
-    files,
+    projectId,
     restartKey,
     settings?.devCommand,
     settings?.installCommand,
+    Boolean(files && files.length > 0),
   ]);
 
   // Sync file changes (hot-reload)
@@ -725,6 +807,8 @@ export const useWebContainer = ({
   useEffect(() => {
     if (!enabled) {
       hasStartedRef.current = false;
+      startedProjectIdRef.current = null;
+      lastDependencySignatureRef.current = null;
       setStatus("idle");
       setPreviewUrl(null);
       setError(null);
@@ -754,15 +838,75 @@ export const useWebContainer = ({
 
     containerRef.current = null;
     hasStartedRef.current = false;
+    startedProjectIdRef.current = null;
     installProcessRef.current = null;
     devProcessRef.current = null;
     lastSyncedRef.current = new Map();
     lastSyncedByIdRef.current = new Map();
+    lastDependencySignatureRef.current = null;
     setStatus("idle");
     setPreviewUrl(null);
     setError(null);
     setRestartKey((k) => k + 1);
   }, []);
+
+  useEffect(() => {
+    if (!enabled || !files || files.length === 0) return;
+
+    const filesMap = new Map(files.map((f) => [f._id, f]));
+
+    const packageJsonCandidates = files
+      .filter(
+        (f) =>
+          f.type === "file" &&
+          f.name === "package.json" &&
+          !f.storageId &&
+          typeof f.content === "string"
+      )
+      .map((f) => ({
+        file: f,
+        path: getFilePath(f, filesMap as unknown as Map<Id<"files">, typeof f>),
+      }))
+      .sort((a, b) => a.path.split("/").length - b.path.split("/").length);
+
+    const packageJson = packageJsonCandidates[0] ?? null;
+    const packageJsonFile = packageJson?.file;
+    const packageJsonPath = packageJson?.path ?? null;
+
+    if (!packageJsonFile || !packageJsonPath) return;
+
+    const projectRoot = packageJsonPath ? getDirname(packageJsonPath) || "." : ".";
+
+    const lockFile = files.find((f) => {
+      if (
+        f.type !== "file" ||
+        f.storageId ||
+        typeof f.content !== "string" ||
+        !["package-lock.json", "pnpm-lock.yaml", "yarn.lock"].includes(f.name)
+      ) {
+        return false;
+      }
+
+      const lockPath = getFilePath(
+        f,
+        filesMap as unknown as Map<Id<"files">, typeof f>
+      );
+      return getDirname(lockPath) === projectRoot;
+    });
+
+    const nextSig = `${packageJsonFile.content ?? ""}\n${
+      typeof lockFile?.content === "string" ? lockFile.content : ""
+    }`;
+
+    const prevSig = lastDependencySignatureRef.current;
+    lastDependencySignatureRef.current = nextSig;
+
+    if (prevSig != null && prevSig !== nextSig) {
+      if (status === "running" || status === "error") {
+        restart("soft");
+      }
+    }
+  }, [enabled, files, projectId, status, restart]);
 
   return {
     status,

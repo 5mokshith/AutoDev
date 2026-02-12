@@ -288,7 +288,7 @@ export const processMessage = inngest.createFunction(
         }
        ),
        tools: (() => {
-        const tools = [
+        const tools: unknown[] = [
         createListFilesTool({ internalKey, projectId, conversationId, messageId }),
         createReadFilesTool({ internalKey, projectId, conversationId, messageId }),
         createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
@@ -311,7 +311,7 @@ export const processMessage = inngest.createFunction(
           );
         }
 
-        return tools;
+        return tools as never;
        })(),
     });
 
@@ -367,21 +367,30 @@ export const processMessage = inngest.createFunction(
       
       // Only attempt fallback if:
       // 1. Error is malformed function call
-      // 2. Current model is gemini-2.5-pro
-      // 3. Provider is Google
-      const shouldFallback = 
+      // 2. Provider is Google
+      // 3. Model is one of the supported Gemini coding models
+      const isSupportedGeminiModel =
+        modelSelection.model === "gemini-2.5-pro" ||
+        modelSelection.model === "gemini-2.5-flash";
+
+      const shouldFallback =
         malformedCheck.isMalformed &&
         modelSelection.provider === "google" &&
-        modelSelection.model === "gemini-2.5-pro";
+        isSupportedGeminiModel;
       
       if (shouldFallback) {
+        const fallbackModel =
+          modelSelection.model === "gemini-2.5-pro"
+            ? "gemini-2.5-flash"
+            : "gemini-2.5-pro";
+
         // Log fallback attempt
         await step.run("log-fallback-attempt", async () => {
-          console.warn("[process-message] Detected malformed function call, falling back to gemini-2.5-flash", {
+          console.warn("[process-message] Detected malformed function call, falling back to alternate Gemini model", {
             messageId,
             conversationId,
             originalModel: modelSelection.model,
-            fallbackModel: "gemini-2.5-flash",
+            fallbackModel,
             errorMessage: malformedCheck.errorMessage,
           });
           
@@ -393,14 +402,14 @@ export const processMessage = inngest.createFunction(
               messageId,
               type: "listFiles",
               status: "warning",
-              name: `Model fallback: gemini-2.5-pro → gemini-2.5-flash (malformed function call)`,
+              name: `Model fallback: ${modelSelection.model} → ${fallbackModel} (malformed function call)`,
             });
           } catch {}
         });
         
         // Recreate agent network with fallback model
         const fallbackTools = (() => {
-          const tools = [
+          const tools: unknown[] = [
             createListFilesTool({ internalKey, projectId, conversationId, messageId }),
             createReadFilesTool({ internalKey, projectId, conversationId, messageId }),
             createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
@@ -421,7 +430,7 @@ export const processMessage = inngest.createFunction(
             })
           );
 
-          return tools;
+          return tools as never;
         })();
         
         const fallbackAgent = createAgent({
@@ -431,7 +440,7 @@ export const processMessage = inngest.createFunction(
           model: getAgentKitModel(
             {
               provider: "google",
-              model: "gemini-2.5-flash",
+              model: fallbackModel,
             },
             {
               temperature: 0.3,
@@ -469,9 +478,10 @@ export const processMessage = inngest.createFunction(
           
           // Log successful fallback
           await step.run("log-fallback-success", async () => {
-            console.info("[process-message] Fallback to gemini-2.5-flash succeeded", {
+            console.info("[process-message] Fallback succeeded", {
               messageId,
               conversationId,
+              fallbackModel,
             });
           });
         } catch (fallbackError) {
@@ -481,11 +491,12 @@ export const processMessage = inngest.createFunction(
               ? fallbackError.message 
               : String(fallbackError);
             
-            console.error("[process-message] Fallback to gemini-2.5-flash also failed", {
+            console.error("[process-message] Fallback also failed", {
               messageId,
               conversationId,
               originalError: malformedCheck.errorMessage,
               fallbackError: fallbackErrMsg,
+              fallbackModel,
             });
           });
           
@@ -493,7 +504,7 @@ export const processMessage = inngest.createFunction(
           throw fallbackError;
         }
       } else {
-        // Not a malformed function call or not gemini-2.5-pro - handle as before
+        // Not a malformed function call or not a supported Gemini model - handle as before
         throw error;
       }
     }

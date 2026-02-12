@@ -61,6 +61,12 @@ export default defineSchema({
         v.literal("cancelled")
       )
     ),
+    aiProvider: v.optional(v.string()),
+    aiModel: v.optional(v.string()),
+    aiTemperature: v.optional(v.number()),
+    aiMaxOutputTokens: v.optional(v.number()),
+    aiIterations: v.optional(v.number()),
+    aiToolCalls: v.optional(v.number()),
   })
     .index("by_conversation", ["conversationId"])
     .index("by_project_status", ["projectId", "status"]),

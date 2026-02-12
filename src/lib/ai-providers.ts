@@ -1,6 +1,7 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
+import { anthropic } from "@ai-sdk/anthropic";
 
 import type { AiSelection, AiProvider } from "@/lib/ai-selection";
 
@@ -22,6 +23,13 @@ export const getCodingModelSelection = (
     return {
       provider,
       model: selection?.model ?? process.env.AUTODEV_OPENAI_CODING_MODEL ?? "gpt-4o-mini",
+    };
+  }
+
+  if (provider === "anthropic") {
+    return {
+      provider,
+      model: selection?.model ?? "claude-3-5-sonnet-20241022",
     };
   }
 
@@ -50,6 +58,13 @@ export const getQuickEditModelSelection = (
     };
   }
 
+  if (provider === "anthropic") {
+    return {
+      provider,
+      model: selection?.model ?? "claude-3-5-sonnet-20241022",
+    };
+  }
+
   return {
     provider,
     model: selection?.model ?? "gemini-2.5-pro",
@@ -66,6 +81,10 @@ export const getLanguageModel = (selection: {
 
   if (selection.provider === "openai") {
     return openai(selection.model);
+  }
+
+  if (selection.provider === "anthropic") {
+    return anthropic(selection.model);
   }
 
   const googleGenAI = createGoogleGenerativeAI({

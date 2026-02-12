@@ -11,7 +11,7 @@ interface CreateFilesToolOptions {
   internalKey: string;
   conversationId: Id<"conversations">;
   messageId: Id<"messages">;
-  provider?: "google" | "groq" | "openai";
+  provider?: "google" | "groq" | "openai" | "anthropic";
 }
 
 const coerceToolParams = (params: unknown) => {
@@ -112,7 +112,7 @@ export const createCreateFilesTool = ({
   provider,
 }: CreateFilesToolOptions) => {
   const toolParameters =
-    provider === "google"
+    provider === "google" || provider === "anthropic"
       ? z.object({
           parentId: z
             .string()
@@ -167,8 +167,8 @@ export const createCreateFilesTool = ({
       "Create multiple files at once in the same folder. Use this to batch create files that share the same parent folder. More efficient than creating files one by one.",
     parameters: toolParameters,
     handler: async (params, { step: toolStep }) => {
-      // Use simplified schema for Google provider
-      const schemaToUse = provider === "google" ? paramsSchemaSimple : paramsSchema;
+      // Use simplified schema for Google and Anthropic providers
+      const schemaToUse = (provider === "google" || provider === "anthropic") ? paramsSchemaSimple : paramsSchema;
       const parsed = schemaToUse.safeParse(coerceToolParams(params));
       if (!parsed.success) {
         return `Error: ${parsed.error.issues[0].message}`;

@@ -11,7 +11,7 @@ interface CreateFolderToolOptions {
   internalKey: string;
   conversationId: Id<"conversations">;
   messageId: Id<"messages">;
-  provider?: "google" | "groq" | "openai";
+  provider?: "google" | "groq" | "openai" | "anthropic";
 }
 
 const coerceToolParams = (params: unknown) => {
@@ -56,7 +56,7 @@ export const createCreateFolderTool = ({
   provider,
 }: CreateFolderToolOptions) => {
   const toolParameters =
-    provider === "google"
+    provider === "google" || provider === "anthropic"
       ? z.object({
           name: z.string().describe("The name of the folder to create"),
           parentId: z

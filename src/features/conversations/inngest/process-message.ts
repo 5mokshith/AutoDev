@@ -1,4 +1,4 @@
-import { createAgent, createNetwork, gemini, openai } from '@inngest/agent-kit';
+import { createAgent, createNetwork, gemini, openai, anthropic } from '@inngest/agent-kit';
 
 import { inngest } from "@/inngest/client";
 import { Id } from "../../../../convex/_generated/dataModel";
@@ -37,8 +37,23 @@ const CODING_MAX_OUTPUT_TOKENS = Number.parseInt(
   10
 );
 
+// Anthropic model-specific max output tokens
+const getAnthropicMaxTokens = (model: string): number => {
+  // Claude 3 Haiku has a 4096 token limit
+  if (model.includes("haiku")) {
+    return 4096;
+  }
+  // Claude 3 Opus and Sonnet support 4096 tokens
+  // Claude 3.5 Sonnet supports 8192 tokens
+  if (model.includes("3-5-sonnet")) {
+    return 8192;
+  }
+  // Default for other Claude models
+  return 4096;
+};
+
 const getAgentKitModel = (
-  selection: { provider: "google" | "groq" | "openai"; model: string },
+  selection: { provider: "google" | "groq" | "openai" | "anthropic"; model: string },
   params: {
     temperature: number;
     maxOutputTokens: number;
@@ -77,6 +92,23 @@ const getAgentKitModel = (
         max_completion_tokens: params.maxOutputTokens,
         tool_choice: "auto",
         parallel_tool_calls: false,
+      },
+    });
+  }
+
+  if (selection.provider === "anthropic") {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new NonRetriableError("ANTHROPIC_API_KEY is not configured");
+    }
+
+    return anthropic({
+      model: selection.model,
+      apiKey,
+      defaultParameters: {
+        temperature: params.temperature,
+        max_tokens: params.maxOutputTokens,
+        tool_choice: { type: "auto" },
       },
     });
   }
@@ -282,9 +314,9 @@ export const processMessage = inngest.createFunction(
         },
         {
           temperature: 0.3,
-          maxOutputTokens: Number.isFinite(CODING_MAX_OUTPUT_TOKENS)
-            ? CODING_MAX_OUTPUT_TOKENS
-            : 4096,
+          maxOutputTokens: modelSelection.provider === "anthropic"
+            ? getAnthropicMaxTokens(modelSelection.model)
+            : (Number.isFinite(CODING_MAX_OUTPUT_TOKENS) ? CODING_MAX_OUTPUT_TOKENS : 4096),
         }
        ),
        tools: (() => {

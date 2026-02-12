@@ -1,6 +1,6 @@
 export const AI_SELECTION_STORAGE_KEY = "autodev_ai_selection";
 
-export type AiProvider = "google" | "groq" | "openai";
+export type AiProvider = "google" | "groq" | "openai" | "anthropic";
 
 export type AiSelection = {
   provider?: AiProvider;
@@ -11,6 +11,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<AiProvider, string> = {
   google: "gemini-2.5-flash",
   groq: "openai/gpt-oss-20b",
   openai: "gpt-4o-mini",
+  anthropic: "claude-3-5-sonnet-20241022",
 };
 
 export const MODELS_BY_PROVIDER: Record<AiProvider, string[]> = {
@@ -35,6 +36,13 @@ export const MODELS_BY_PROVIDER: Record<AiProvider, string[]> = {
     "o1-mini",
     "o1",
   ],
+  anthropic: [
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-sonnet-20240620",
+    "claude-3-opus-20240229",
+    "claude-3-sonnet-20240229",
+    "claude-3-haiku-20240307",
+  ],
 };
 
 export const readAiSelection = (): AiSelection | undefined => {
@@ -51,7 +59,7 @@ export const readAiSelection = (): AiSelection | undefined => {
 
     return {
       provider:
-        provider === "google" || provider === "groq" || provider === "openai"
+        provider === "google" || provider === "groq" || provider === "openai" || provider === "anthropic"
           ? provider
           : undefined,
       model: typeof model === "string" ? model : undefined,

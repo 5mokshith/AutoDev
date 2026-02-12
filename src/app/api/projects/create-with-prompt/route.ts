@@ -17,7 +17,7 @@ import { api } from "../../../../../convex/_generated/api";
 
 const aiSelectionSchema = z
   .object({
-    provider: z.enum(["google", "groq", "openai"]).optional(),
+    provider: z.enum(["google", "groq", "openai", "anthropic"]).optional(),
     model: z.string().optional(),
   })
   .optional();

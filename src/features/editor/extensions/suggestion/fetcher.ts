@@ -15,7 +15,7 @@ const suggestionRequestSchema = z.object({
   lineNumber: z.number(),
   ai: z
     .object({
-      provider: z.enum(["google", "groq", "openai"]).optional(),
+      provider: z.enum(["google", "groq", "openai", "anthropic"]).optional(),
       model: z.string().optional(),
     })
     .optional(),

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Allotment } from "allotment";
-import { FaGithub } from "react-icons/fa";
+import { Maximize2Icon, XIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { EditorView } from "@/features/editor/components/editor-view";
@@ -45,6 +45,31 @@ export const ProjectIdView = ({
   projectId: Id<"projects">
 }) => {
   const [activeView, setActiveView] = useState<"editor" | "preview">("editor");
+  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!isPreviewFullscreen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsPreviewFullscreen(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isPreviewFullscreen]);
+
+  useEffect(() => {
+    if (!isPreviewFullscreen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isPreviewFullscreen]);
 
   return (
     <div className="h-full flex flex-col">
@@ -60,6 +85,17 @@ export const ProjectIdView = ({
           onClick={() => setActiveView("preview")}
         />
         <div className="flex-1 flex justify-end items-center gap-2 h-full pr-2">
+          <div
+            onClick={() => {
+              setActiveView("preview");
+              setIsPreviewFullscreen(true);
+            }}
+            className="flex items-center gap-1.5 h-full px-3 cursor-pointer text-muted-foreground border-l hover:bg-accent/30"
+            title="Open preview in full screen (Esc to close)"
+          >
+            <Maximize2Icon className="size-3.5" />
+            <span className="text-sm">Preview</span>
+          </div>
           <ExportPopover projectId={projectId} />
         </div>
       </nav>
@@ -84,8 +120,19 @@ export const ProjectIdView = ({
         </div>
         <div className={cn(
           "absolute inset-0",
-          activeView === "preview" ? "visible" : "invisible"
+          (activeView === "preview" || isPreviewFullscreen) ? "visible" : "invisible",
+          isPreviewFullscreen && "fixed inset-0 z-50 bg-background"
         )}>
+          {isPreviewFullscreen && (
+            <button
+              type="button"
+              onClick={() => setIsPreviewFullscreen(false)}
+              className="absolute top-3 right-3 z-50 inline-flex items-center justify-center size-9 rounded-md border bg-background/80 text-foreground shadow-sm backdrop-blur hover:bg-background"
+              title="Close (Esc)"
+            >
+              <XIcon className="size-4" />
+            </button>
+          )}
           <PreviewView projectId={projectId} />
         </div>
       </div>

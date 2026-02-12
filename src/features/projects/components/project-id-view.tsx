@@ -127,7 +127,7 @@ export const ProjectIdView = ({
             <button
               type="button"
               onClick={() => setIsPreviewFullscreen(false)}
-              className="absolute top-3 right-3 z-50 inline-flex items-center justify-center size-9 rounded-md border bg-background/80 text-foreground shadow-sm backdrop-blur hover:bg-background"
+              className="absolute top-10 right-5 z-50 inline-flex items-center justify-center size-9 rounded-md border bg-background/80 text-foreground shadow-sm backdrop-blur hover:bg-background"
               title="Close (Esc)"
             >
               <XIcon className="size-4" />

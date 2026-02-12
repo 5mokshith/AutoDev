@@ -13,24 +13,21 @@ interface ReadFilesToolOptions {
   messageId: Id<"messages">;
 }
 
+const nullableCoercedInt = (opts: { min: number; max: number }) =>
+  z.preprocess(
+    (v) => (v == null || v === "" ? null : v),
+    z.union([
+      z.coerce.number().int().min(opts.min).max(opts.max),
+      z.null(),
+    ])
+  );
+
 const paramsSchema = z.object({
   fileIds: z
     .array(z.string().min(1, "File ID cannot be empty"))
     .min(1, "Provide at least one file ID"),
-  maxChars: z
-    .coerce
-    .number()
-    .int()
-    .min(1)
-    .max(200_000)
-    .optional(),
-  maxLines: z
-    .coerce
-    .number()
-    .int()
-    .min(1)
-    .max(5000)
-    .optional(),
+  maxChars: nullableCoercedInt({ min: 1, max: 200_000 }),
+  maxLines: nullableCoercedInt({ min: 1, max: 5000 }),
 });
 
 export const createReadFilesTool = ({
@@ -44,20 +41,12 @@ export const createReadFilesTool = ({
     description: "Read the content of files from the project. Returns file contents.",
     parameters: z.object({
       fileIds: z.array(z.string()).describe("Array of file IDs to read"),
-      maxChars: z
-        .coerce
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe("Maximum characters to return per file"),
-      maxLines: z
-        .coerce
-        .number()
-        .int()
-        .min(1)
-        .optional()
-        .describe("Maximum lines to return per file"),
+      maxChars: nullableCoercedInt({ min: 1, max: 200_000 }).describe(
+        "Maximum characters to return per file (or null to use default)"
+      ),
+      maxLines: nullableCoercedInt({ min: 1, max: 5000 }).describe(
+        "Maximum lines to return per file (or null to use default)"
+      ),
     }),
     handler: async (params, { step: toolStep }) => {
       const parsed = paramsSchema.safeParse(params);

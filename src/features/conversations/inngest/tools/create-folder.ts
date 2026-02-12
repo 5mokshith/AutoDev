@@ -11,11 +11,24 @@ interface CreateFolderToolOptions {
   internalKey: string;
   conversationId: Id<"conversations">;
   messageId: Id<"messages">;
+  provider?: "google" | "groq" | "openai";
 }
+
+const coerceToolParams = (params: unknown) => {
+  if (typeof params === "string") {
+    try {
+      return JSON.parse(params) as unknown;
+    } catch {
+      return params;
+    }
+  }
+
+  return params;
+};
 
 const paramsSchema = z.object({
   name: z.string().min(1, "Folder name is required"),
-  parentId: z.string(),
+  parentId: z.preprocess((v) => (v == null ? "" : v), z.string()),
 });
 
 export const createCreateFolderTool = ({
@@ -23,20 +36,35 @@ export const createCreateFolderTool = ({
   internalKey,
   conversationId,
   messageId,
+  provider,
 }: CreateFolderToolOptions) => {
+  const toolParameters =
+    provider === "google"
+      ? z.object({
+          name: z.string().describe("The name of the folder to create"),
+          parentId: z
+            .string()
+            .optional()
+            .describe(
+              "The ID (not name!) of the parent folder from listFiles, or empty string for root level"
+            ),
+        })
+      : z.object({
+          name: z.string().describe("The name of the folder to create"),
+          parentId: z
+            .string()
+            .nullable()
+            .describe(
+              "The ID (not name!) of the parent folder from listFiles, or empty string for root level"
+            ),
+        });
+
   return createTool({
     name: "createFolder",
     description: "Create a new folder in the project",
-    parameters: z.object({
-      name: z.string().describe("The name of the folder to create"),
-      parentId: z
-        .string()
-        .describe(
-          "The ID (not name!) of the parent folder from listFiles, or empty string for root level"
-        ),
-    }),
+    parameters: toolParameters,
     handler: async (params, { step: toolStep }) => {
-      const parsed = paramsSchema.safeParse(params);
+      const parsed = paramsSchema.safeParse(coerceToolParams(params));
       if (!parsed.success) {
         return `Error: ${parsed.error.issues[0].message}`;
       }

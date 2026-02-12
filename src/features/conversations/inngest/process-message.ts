@@ -13,13 +13,15 @@ import { DEFAULT_CONVERSATION_TITLE } from "../constants";
 import { createReadFilesTool } from './tools/read-files';
 import { createListFilesTool } from './tools/list-files';
 import { createUpdateFileTool } from './tools/update-file';
-import { createCreateFilesTool } from './tools/create-files';
+import { createCreateFilesTool, createCreatefilesFilesTool } from './tools/create-files';
 import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
 
 import { normalizeAiSelection, type AiSelection } from "@/lib/ai-selection";
+import { isMalformedFunctionCallError } from './utils/error-detection';
+import { formatFallbackNotice } from './utils/user-feedback';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -285,16 +287,32 @@ export const processMessage = inngest.createFunction(
             : 4096,
         }
        ),
-       tools: [
+       tools: (() => {
+        const tools = [
         createListFilesTool({ internalKey, projectId, conversationId, messageId }),
         createReadFilesTool({ internalKey, projectId, conversationId, messageId }),
         createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
-        createCreateFilesTool({ projectId, internalKey, conversationId, messageId }),
-        createCreateFolderTool({ projectId, internalKey, conversationId, messageId }),
+        createCreateFilesTool({ projectId, internalKey, conversationId, messageId, provider: modelSelection.provider }),
+        createCreateFolderTool({ projectId, internalKey, conversationId, messageId, provider: modelSelection.provider }),
         createRenameFileTool({ internalKey, projectId, conversationId, messageId }),
         createDeleteFilesTool({ internalKey, projectId, conversationId, messageId }),
         createScrapeUrlsTool(),
-       ],
+        ];
+
+        if (modelSelection.provider === "google") {
+          tools.push(
+            createCreatefilesFilesTool({
+              projectId,
+              internalKey,
+              conversationId,
+              messageId,
+              provider: modelSelection.provider,
+            })
+          );
+        }
+
+        return tools;
+       })(),
     });
 
     // Create network with single agent
@@ -320,33 +338,166 @@ export const processMessage = inngest.createFunction(
       }
     });
 
+    const agentInput = message;
+
     // Run the agent
     let result: Awaited<ReturnType<typeof network.run>>;
+    let didFallback = false;
+    
     try {
-      result = await network.run(message);
-    } catch (err) {
-      const providerLabel =
-        modelSelection.provider === "groq"
-          ? "Groq"
-          : modelSelection.provider === "openai"
-            ? "OpenAI"
-            : "Gemini";
-      const modelLabel = modelSelection.model;
-
-      await step.run("update-assistant-message", async () => {
-        await convex.mutation(api.system.updateMessageContent, {
-          internalKey,
-          messageId,
-          content:
-            `I hit an error while running the agent with ${providerLabel} (${modelLabel}). ` +
-            `This usually happens when the model returns an invalid tool-call payload. ` +
-            `Try switching the model to one of: gpt-4o-mini, gpt-4o, qwen/qwen3-32b, openai/gpt-oss-20b, groq/compound-mini.`,
-        });
+      result = await network.run(agentInput);
+    } catch (error) {
+      // Debug logging to understand error structure
+      console.log("[process-message] Error caught:", {
+        errorType: typeof error,
+        isError: error instanceof Error,
+        errorString: String(error).substring(0, 200),
+        messageId,
+        model: modelSelection.model,
       });
+      
+      const malformedCheck = isMalformedFunctionCallError(error);
+      
+      console.log("[process-message] Malformed check result:", {
+        isMalformed: malformedCheck.isMalformed,
+        provider: modelSelection.provider,
+        model: modelSelection.model,
+        messageId,
+      });
+      
+      // Only attempt fallback if:
+      // 1. Error is malformed function call
+      // 2. Current model is gemini-2.5-pro
+      // 3. Provider is Google
+      const shouldFallback = 
+        malformedCheck.isMalformed &&
+        modelSelection.provider === "google" &&
+        modelSelection.model === "gemini-2.5-pro";
+      
+      if (shouldFallback) {
+        // Log fallback attempt
+        await step.run("log-fallback-attempt", async () => {
+          console.warn("[process-message] Detected malformed function call, falling back to gemini-2.5-flash", {
+            messageId,
+            conversationId,
+            originalModel: modelSelection.model,
+            fallbackModel: "gemini-2.5-flash",
+            errorMessage: malformedCheck.errorMessage,
+          });
+          
+          try {
+            await convex.mutation(api.system.createAgentEvent, {
+              internalKey,
+              projectId,
+              conversationId,
+              messageId,
+              type: "listFiles",
+              status: "warning",
+              name: `Model fallback: gemini-2.5-pro → gemini-2.5-flash (malformed function call)`,
+            });
+          } catch {}
+        });
+        
+        // Recreate agent network with fallback model
+        const fallbackTools = (() => {
+          const tools = [
+            createListFilesTool({ internalKey, projectId, conversationId, messageId }),
+            createReadFilesTool({ internalKey, projectId, conversationId, messageId }),
+            createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
+            createCreateFilesTool({ projectId, internalKey, conversationId, messageId, provider: "google" }),
+            createCreateFolderTool({ projectId, internalKey, conversationId, messageId, provider: "google" }),
+            createRenameFileTool({ internalKey, projectId, conversationId, messageId }),
+            createDeleteFilesTool({ internalKey, projectId, conversationId, messageId }),
+            createScrapeUrlsTool(),
+          ];
 
-      return { success: false, messageId, conversationId };
+          tools.push(
+            createCreatefilesFilesTool({
+              projectId,
+              internalKey,
+              conversationId,
+              messageId,
+              provider: "google",
+            })
+          );
+
+          return tools;
+        })();
+        
+        const fallbackAgent = createAgent({
+          name: "AutoDev",
+          description: "An expert AI coding assistant",
+          system: systemPrompt,
+          model: getAgentKitModel(
+            {
+              provider: "google",
+              model: "gemini-2.5-flash",
+            },
+            {
+              temperature: 0.3,
+              maxOutputTokens: Number.isFinite(CODING_MAX_OUTPUT_TOKENS)
+                ? CODING_MAX_OUTPUT_TOKENS
+                : 4096,
+            }
+          ),
+          tools: fallbackTools,
+        });
+        
+        const fallbackNetwork = createNetwork({
+          name: "AutoDev-network-fallback",
+          agents: [fallbackAgent],
+          maxIter: 20,
+          router: ({ network }) => {
+            const lastResult = network.state.results.at(-1);
+            const hasTextResponse = lastResult?.output.some(
+              (m) => m.type === "text" && m.role === "assistant"
+            );
+            const hasToolCalls = lastResult?.output.some(
+              (m) => m.type === "tool_call"
+            );
+            if (hasTextResponse && !hasToolCalls) {
+              return undefined;
+            }
+            return fallbackAgent;
+          }
+        });
+        
+        // Retry with fallback model
+        try {
+          result = await fallbackNetwork.run(agentInput);
+          didFallback = true;
+          
+          // Log successful fallback
+          await step.run("log-fallback-success", async () => {
+            console.info("[process-message] Fallback to gemini-2.5-flash succeeded", {
+              messageId,
+              conversationId,
+            });
+          });
+        } catch (fallbackError) {
+          // Fallback also failed - handle as generic error
+          await step.run("log-fallback-failure", async () => {
+            const fallbackErrMsg = fallbackError instanceof Error 
+              ? fallbackError.message 
+              : String(fallbackError);
+            
+            console.error("[process-message] Fallback to gemini-2.5-flash also failed", {
+              messageId,
+              conversationId,
+              originalError: malformedCheck.errorMessage,
+              fallbackError: fallbackErrMsg,
+            });
+          });
+          
+          // Re-throw to be handled by existing error handling
+          throw fallbackError;
+        }
+      } else {
+        // Not a malformed function call or not gemini-2.5-pro - handle as before
+        throw error;
+      }
     }
-
+    
     // Extract the assistant's text response from the last agent result
     const lastResult = result.state.results.at(-1);
     const textMessage = lastResult?.output.find(
@@ -361,6 +512,11 @@ export const processMessage = inngest.createFunction(
         typeof textMessage.content === "string"
           ? textMessage.content
           : textMessage.content.map((c) => c.text).join("");
+    }
+
+    // Prepend fallback notice if we used fallback model
+    if (didFallback) {
+      assistantResponse = formatFallbackNotice() + "\n\n" + assistantResponse;
     }
 
     // Update the assistant message with the response (this also sets status to completed)

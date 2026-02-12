@@ -28,8 +28,8 @@ export const createUpdateFileTool = ({
     name: "updateFile",
     description: "Update the content of an existing file",
     parameters: z.object({
-      fileId: z.string().describe("The ID of the file to update"),
-      content: z.string().describe("The new content for the file"),
+      fileId: z.string().describe("The ID of the file to update (from listFiles output)"),
+      content: z.string().describe("Complete new file content as a properly escaped JSON string. Use \\n for line breaks. Escape all quotes with backslash (\\\" for double quotes)."),
     }),
     handler: async (params, { step: toolStep }) => {
       const parsed = paramsSchema.safeParse(params);

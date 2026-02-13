@@ -18,6 +18,7 @@ import { createCreateFolderTool } from './tools/create-folder';
 import { createRenameFileTool } from './tools/rename-file';
 import { createDeleteFilesTool } from './tools/delete-files';
 import { createScrapeUrlsTool } from './tools/scrape-urls';
+import { createSearchWebTool } from './tools/search-web';
 
 import { normalizeAiSelection, type AiSelection } from "@/lib/ai-selection";
 import { isMalformedFunctionCallError } from './utils/error-detection';
@@ -329,6 +330,7 @@ export const processMessage = inngest.createFunction(
         createRenameFileTool({ internalKey, projectId, conversationId, messageId }),
         createDeleteFilesTool({ internalKey, projectId, conversationId, messageId }),
         createScrapeUrlsTool(),
+        createSearchWebTool(),
         ];
 
         if (modelSelection.provider === "google") {
@@ -450,6 +452,7 @@ export const processMessage = inngest.createFunction(
             createRenameFileTool({ internalKey, projectId, conversationId, messageId }),
             createDeleteFilesTool({ internalKey, projectId, conversationId, messageId }),
             createScrapeUrlsTool(),
+            createSearchWebTool(),
           ];
 
           tools.push(

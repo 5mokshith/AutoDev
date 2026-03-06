@@ -19,7 +19,7 @@ import { useProject } from "../hooks/use-projects";
 
 import { Id } from "../../../../convex/_generated/dataModel";
 
-export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
+export const PreviewView = ({ projectId, enabled }: { projectId: Id<"projects">; enabled: boolean }) => {
   const project = useProject(projectId);
   const [showTerminal, setShowTerminal] = useState(true);
   const [iframeState, setIframeState] = useState<
@@ -30,7 +30,7 @@ export const PreviewView = ({ projectId }: { projectId: Id<"projects"> }) => {
     status, previewUrl, error, restart, terminalOutput
   } = useWebContainer({
     projectId,
-    enabled: true,
+    enabled,
     settings: project?.settings,
   });
 

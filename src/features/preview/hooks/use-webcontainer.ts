@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WebContainer } from "@webcontainer/api";
 
 import { 
@@ -107,16 +107,49 @@ const store = (globalStore.__autodevWebcontainer ??= {
   installedSignature: null,
 });
 
+const BOOT_TIMEOUT_MS = 20_000;
+const BOOT_MAX_RETRIES = 2;
+
 const getWebContainer = async (): Promise<WebContainer> => {
   if (store.instance) {
     return store.instance;
   }
 
   if (!store.bootPromise) {
-    store.bootPromise = WebContainer.boot({ coep: "credentialless" });
+    store.bootPromise = (async () => {
+      for (let attempt = 0; attempt <= BOOT_MAX_RETRIES; attempt++) {
+        try {
+          const instance = await Promise.race([
+            WebContainer.boot({ coep: "credentialless" }),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error("WebContainer boot timed out")),
+                BOOT_TIMEOUT_MS
+              )
+            ),
+          ]);
+          return instance;
+        } catch (err) {
+          if (attempt === BOOT_MAX_RETRIES) {
+            store.bootPromise = null;
+            throw err;
+          }
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+      throw new Error("WebContainer boot failed after retries");
+    })();
   }
 
-  store.instance = await store.bootPromise;
+  try {
+    store.instance = await store.bootPromise;
+  } catch {
+    store.bootPromise = null;
+    throw new Error(
+      "WebContainer failed to start. Ensure your browser supports SharedArrayBuffer and correct COOP/COEP headers are set."
+    );
+  }
+
   return store.instance;
 };
 
@@ -214,6 +247,7 @@ const fixNestedNodeScriptPath = (
 };
 
 const DEV_SERVER_READY_TIMEOUT_MS = 60_000;
+const MAX_TERMINAL_OUTPUT = 100_000;
 
 export const useWebContainer = ({
   projectId,
@@ -245,6 +279,8 @@ export const useWebContainer = ({
   const serverReadyUnsubRef = useRef<null | (() => void)>(null);
   const projectRootRef = useRef<string>(".");
   const lastDependencySignatureRef = useRef<string | null>(null);
+  const devCrashCountRef = useRef(0);
+  const lastDevCrashRef = useRef(0);
 
   // Fetch files from Convex (auto-updates on changes)
   const files = useFiles(projectId);
@@ -274,7 +310,14 @@ export const useWebContainer = ({
         setPreviewUrl(null);
 
         const appendOutput = (data: string) => {
-          setTerminalOutput((prev) => prev + data);
+          setTerminalOutput((prev) => {
+            const next = prev + data;
+            if (next.length > MAX_TERMINAL_OUTPUT) {
+              const trimIndex = next.indexOf("\n", next.length - MAX_TERMINAL_OUTPUT);
+              return trimIndex !== -1 ? next.slice(trimIndex + 1) : next.slice(-MAX_TERMINAL_OUTPUT);
+            }
+            return next;
+          });
         };
 
         const container = await getWebContainer();
@@ -671,6 +714,22 @@ export const useWebContainer = ({
 
           if (code === 0) return;
 
+          // Auto-restart on crash (max 2 retries within 30s window)
+          const now = Date.now();
+          if (now - lastDevCrashRef.current > 30_000) {
+            devCrashCountRef.current = 0;
+          }
+          lastDevCrashRef.current = now;
+          devCrashCountRef.current++;
+
+          if (devCrashCountRef.current <= 2) {
+            appendOutput(`\n[!] Dev process crashed (code ${code}), restarting (attempt ${devCrashCountRef.current}/2)...\n`);
+            setTimeout(() => {
+              if (!cancelledRef.current) restart("soft");
+            }, 1500 * devCrashCountRef.current);
+            return;
+          }
+
           setError(`Dev process exited with code ${code}`);
           setStatus("error");
         });
@@ -744,48 +803,66 @@ export const useWebContainer = ({
             });
           }
 
+          // Phase 1: Delete removed files in parallel
+          const deletions: Promise<void>[] = [];
           for (const [id, prev] of lastSyncedById) {
             if (desiredById.has(id)) continue;
-            try {
-              await container.fs.rm(prev.path, { force: true, recursive: true });
-            } catch {}
+            deletions.push(
+              container.fs.rm(prev.path, { force: true, recursive: true }).catch(() => {})
+            );
             lastSynced.delete(prev.path);
             lastSyncedById.delete(id);
           }
+          if (deletions.length > 0) await Promise.all(deletions);
+
+          // Phase 2: Handle renames sequentially (order-sensitive)
+          for (const [id, next] of desiredById) {
+            const prev = lastSyncedById.get(id);
+            if (!prev || prev.path === next.path) continue;
+            const tmpPath = `${next.path}.__case_tmp__${Date.now()}`;
+            try {
+              await container.fs.rename(prev.path, tmpPath);
+              await container.fs.rename(tmpPath, next.path);
+              lastSynced.delete(prev.path);
+            } catch {
+              try { await container.fs.rm(prev.path, { force: true }); } catch {}
+              lastSynced.delete(prev.path);
+            }
+          }
+
+          // Phase 3: Collect changed files, ensure dirs, write in parallel
+          const dirsNeeded = new Set<string>();
+          const writes: { id: string; path: string; content: string; updatedAt: number }[] = [];
 
           for (const [id, next] of desiredById) {
             const prev = lastSyncedById.get(id);
             const hasMoved = Boolean(prev && prev.path !== next.path);
-
-            if (hasMoved && prev) {
-              const tmpPath = `${next.path}.__case_tmp__${Date.now()}`;
-              try {
-                await container.fs.rename(prev.path, tmpPath);
-                await container.fs.rename(tmpPath, next.path);
-                lastSynced.delete(prev.path);
-              } catch {
-                try {
-                  await container.fs.rm(prev.path, { force: true });
-                } catch {}
-                lastSynced.delete(prev.path);
-              }
-            }
-
             const lastUpdatedAt = lastSynced.get(next.path);
-            if (!hasMoved && lastUpdatedAt === next.updatedAt) {
-              continue;
-            }
+            if (!hasMoved && lastUpdatedAt === next.updatedAt) continue;
 
             const dir = getDirname(next.path);
-            if (dir) {
-              try {
-                await container.fs.mkdir(dir, { recursive: true });
-              } catch {}
-            }
+            if (dir) dirsNeeded.add(dir);
+            writes.push({ id, ...next });
+          }
 
-            await container.fs.writeFile(next.path, next.content);
-            lastSynced.set(next.path, next.updatedAt);
-            lastSyncedById.set(id, { path: next.path, updatedAt: next.updatedAt });
+          // Create all needed directories in parallel
+          if (dirsNeeded.size > 0) {
+            await Promise.all(
+              [...dirsNeeded].map((dir) =>
+                container.fs.mkdir(dir, { recursive: true }).catch(() => {})
+              )
+            );
+          }
+
+          // Write all changed files in parallel
+          if (writes.length > 0) {
+            await Promise.all(
+              writes.map(async ({ id, path, content, updatedAt }) => {
+                await container.fs.writeFile(path, content);
+                lastSynced.set(path, updatedAt);
+                lastSyncedById.set(id, { path, updatedAt });
+              })
+            );
           }
         } finally {
           syncInFlightRef.current = false;
@@ -850,63 +927,57 @@ export const useWebContainer = ({
     setRestartKey((k) => k + 1);
   }, []);
 
-  useEffect(() => {
-    if (!enabled || !files || files.length === 0) return;
+  // Compute dependency signature only from package.json + lock files (stable across unrelated edits)
+  const dependencySignature = useMemo(() => {
+    if (!files || files.length === 0) return null;
+
+    const depFileNames = new Set([
+      "package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
+    ]);
+    const depFiles = files.filter(
+      (f) =>
+        f.type === "file" &&
+        !f.storageId &&
+        typeof f.content === "string" &&
+        depFileNames.has(f.name)
+    );
+
+    if (depFiles.length === 0) return null;
 
     const filesMap = new Map(files.map((f) => [f._id, f]));
-
-    const packageJsonCandidates = files
-      .filter(
-        (f) =>
-          f.type === "file" &&
-          f.name === "package.json" &&
-          !f.storageId &&
-          typeof f.content === "string"
-      )
+    const pkgCandidates = depFiles
+      .filter((f) => f.name === "package.json")
       .map((f) => ({
         file: f,
         path: getFilePath(f, filesMap as unknown as Map<Id<"files">, typeof f>),
       }))
       .sort((a, b) => a.path.split("/").length - b.path.split("/").length);
 
-    const packageJson = packageJsonCandidates[0] ?? null;
-    const packageJsonFile = packageJson?.file;
-    const packageJsonPath = packageJson?.path ?? null;
+    const pkg = pkgCandidates[0];
+    if (!pkg) return null;
 
-    if (!packageJsonFile || !packageJsonPath) return;
-
-    const projectRoot = packageJsonPath ? getDirname(packageJsonPath) || "." : ".";
-
-    const lockFile = files.find((f) => {
-      if (
-        f.type !== "file" ||
-        f.storageId ||
-        typeof f.content !== "string" ||
-        !["package-lock.json", "pnpm-lock.yaml", "yarn.lock"].includes(f.name)
-      ) {
-        return false;
-      }
-
-      const lockPath = getFilePath(
-        f,
-        filesMap as unknown as Map<Id<"files">, typeof f>
-      );
+    const projectRoot = getDirname(pkg.path) || ".";
+    const lockFile = depFiles.find((f) => {
+      if (f.name === "package.json") return false;
+      const lockPath = getFilePath(f, filesMap as unknown as Map<Id<"files">, typeof f>);
       return getDirname(lockPath) === projectRoot;
     });
 
-    const nextSig = `${packageJsonFile.content ?? ""}\n${
-      typeof lockFile?.content === "string" ? lockFile.content : ""
-    }`;
+    return `${pkg.file.content ?? ""}\n${lockFile?.content ?? ""}`;
+  }, [files]);
+
+  useEffect(() => {
+    if (!enabled || dependencySignature == null) return;
 
     const prevSig = lastDependencySignatureRef.current;
-    lastDependencySignatureRef.current = nextSig;
+    lastDependencySignatureRef.current = dependencySignature;
 
-    if (prevSig != null && prevSig !== nextSig) {
+    if (prevSig != null && prevSig !== dependencySignature) {
       if (status === "running" || status === "error") {
         restart("soft");
       }
     }
-  }, [enabled, files, projectId, status, restart]);
+  }, [enabled, dependencySignature, status, restart]);
 
   return {
     status,

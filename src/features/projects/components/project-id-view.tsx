@@ -39,13 +39,21 @@ const Tab = ({
   );
 };
 
-export const ProjectIdView = ({ 
+export const ProjectIdView = ({
   projectId
-}: { 
+}: {
   projectId: Id<"projects">
 }) => {
   const [activeView, setActiveView] = useState<"editor" | "preview">("editor");
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const [previewEnabled, setPreviewEnabled] = useState(false);
+
+  // Only boot WebContainer once the user actually opens the Preview tab
+  useEffect(() => {
+    if (activeView === "preview" || isPreviewFullscreen) {
+      setPreviewEnabled(true);
+    }
+  }, [activeView, isPreviewFullscreen]);
 
   useEffect(() => {
     if (!isPreviewFullscreen) return;
@@ -133,7 +141,7 @@ export const ProjectIdView = ({
               <XIcon className="size-4" />
             </button>
           )}
-          <PreviewView projectId={projectId} />
+          <PreviewView projectId={projectId} enabled={previewEnabled} />
         </div>
       </div>
     </div>

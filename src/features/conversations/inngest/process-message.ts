@@ -5,8 +5,9 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { NonRetriableError } from "inngest";
 import { convex } from "@/lib/convex-client";
 import { api } from "../../../../convex/_generated/api";
-import { 
-  CODING_AGENT_SYSTEM_PROMPT, 
+import {
+  CODING_AGENT_SYSTEM_PROMPT,
+  GOOGLE_FILE_CREATION_PROMPT,
   TITLE_GENERATOR_SYSTEM_PROMPT
 } from "./constants";
 import { DEFAULT_CONVERSATION_TITLE } from "../constants";
@@ -23,6 +24,7 @@ import { createSearchWebTool } from './tools/search-web';
 import { normalizeAiSelection, type AiSelection } from "@/lib/ai-selection";
 import { isMalformedFunctionCallError } from './utils/error-detection';
 import { formatFallbackNotice } from './utils/user-feedback';
+import { parseFileMarkers, createFilesFromMarkers } from './utils/file-markers';
 
 interface MessageEvent {
   messageId: Id<"messages">;
@@ -198,10 +200,16 @@ export const processMessage = inngest.createFunction(
     });
 
     // Build system prompt with conversation history (exclude the current processing message)
+    const isGoogle = modelSelection.provider === "google";
     const customSystemPrompt = process.env.AUTODEV_CUSTOM_SYSTEM_PROMPT;
     let systemPrompt = customSystemPrompt
       ? `${customSystemPrompt}\n\n${CODING_AGENT_SYSTEM_PROMPT}`
       : CODING_AGENT_SYSTEM_PROMPT;
+
+    // Google/Gemini: use text-based file creation (XML markers) instead of function calling
+    if (isGoogle) {
+      systemPrompt += GOOGLE_FILE_CREATION_PROMPT;
+    }
 
     // Filter out the current processing message and empty messages
     const contextMessages = recentMessages.filter(
@@ -324,26 +332,20 @@ export const processMessage = inngest.createFunction(
         const tools: unknown[] = [
         createListFilesTool({ internalKey, projectId, conversationId, messageId }),
         createReadFilesTool({ internalKey, projectId, conversationId, messageId }),
-        createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
-        createCreateFilesTool({ projectId, internalKey, conversationId, messageId, provider: modelSelection.provider }),
+        // Google/Gemini: file content goes via XML markers in text output, not function calls.
+        // Gemini cannot reliably serialize large code strings into function-call JSON.
+        ...(isGoogle
+          ? []
+          : [
+              createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
+              createCreateFilesTool({ projectId, internalKey, conversationId, messageId, provider: modelSelection.provider }),
+            ]),
         createCreateFolderTool({ projectId, internalKey, conversationId, messageId, provider: modelSelection.provider }),
         createRenameFileTool({ internalKey, projectId, conversationId, messageId }),
         createDeleteFilesTool({ internalKey, projectId, conversationId, messageId }),
         createScrapeUrlsTool(),
         createSearchWebTool(),
         ];
-
-        if (modelSelection.provider === "google") {
-          tools.push(
-            createCreatefilesFilesTool({
-              projectId,
-              internalKey,
-              conversationId,
-              messageId,
-              provider: modelSelection.provider,
-            })
-          );
-        }
 
         return tools as never;
        })(),
@@ -441,29 +443,17 @@ export const processMessage = inngest.createFunction(
           } catch {}
         });
         
-        // Recreate agent network with fallback model
+        // Recreate agent network with fallback model (no file-content tools for Google)
         const fallbackTools = (() => {
           const tools: unknown[] = [
             createListFilesTool({ internalKey, projectId, conversationId, messageId }),
             createReadFilesTool({ internalKey, projectId, conversationId, messageId }),
-            createUpdateFileTool({ internalKey, projectId, conversationId, messageId }),
-            createCreateFilesTool({ projectId, internalKey, conversationId, messageId, provider: "google" }),
             createCreateFolderTool({ projectId, internalKey, conversationId, messageId, provider: "google" }),
             createRenameFileTool({ internalKey, projectId, conversationId, messageId }),
             createDeleteFilesTool({ internalKey, projectId, conversationId, messageId }),
             createScrapeUrlsTool(),
             createSearchWebTool(),
           ];
-
-          tools.push(
-            createCreatefilesFilesTool({
-              projectId,
-              internalKey,
-              conversationId,
-              messageId,
-              provider: "google",
-            })
-          );
 
           return tools as never;
         })();
@@ -558,6 +548,33 @@ export const processMessage = inngest.createFunction(
         typeof textMessage.content === "string"
           ? textMessage.content
           : textMessage.content.map((c) => c.text).join("");
+    }
+
+    // Google/Gemini: extract <autodev_file> markers and create files from text output
+    if (isGoogle) {
+      const { files: markerFiles, cleanedText } =
+        parseFileMarkers(assistantResponse);
+
+      if (markerFiles.length > 0) {
+        const { created, failed } = await step.run(
+          "create-files-from-markers",
+          async () =>
+            createFilesFromMarkers(markerFiles, {
+              internalKey,
+              projectId,
+              conversationId,
+              messageId,
+            })
+        );
+
+        // Replace markers with a clean summary in the response
+        assistantResponse = cleanedText;
+        if (failed.length > 0) {
+          assistantResponse += `\n\nFailed to create: ${failed
+            .map((f) => `${f.path} (${f.error})`)
+            .join(", ")}`;
+        }
+      }
     }
 
     // Prepend fallback notice if we used fallback model

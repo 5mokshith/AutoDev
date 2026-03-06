@@ -443,8 +443,8 @@ export const createCreatefilesFilesTool = ({
         });
 
   return createTool({
-    name: "CreatefilesFiles",
-    description: "Create a single file. (Compatibility alias for Gemini tool calls.)",
+    name: "createFile",
+    description: "Create a single file in the project. Call once per file. Pass the file name (with extension), the full file content as a string, and optionally a parentId (folder ID or path).",
     parameters: toolParameters,
     handler: async (params, { step: toolStep }) => {
       const parsed = createFilesAliasParamsSchema.safeParse(coerceToolParams(params));

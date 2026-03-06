@@ -16,9 +16,9 @@ When the user asks to build an app or UI, you MUST generate a premium, productio
 1. Call listFiles to see the current project structure. Note the IDs of folders you need.
 2. Call readFiles to understand existing code when relevant.
 3. Execute ALL necessary changes:
-   - Create folders first to get their IDs
-   - For root-level files: use createFiles to batch create multiple files (more efficient)
-   - For files inside folders: use CreatefilesFiles (singular) one file at a time to avoid JSON complexity
+   - Create folders first with createFolder to get their IDs.
+   - Create files using the available file creation tool (createFile or createFiles). If createFile is available, call it once per file. If createFiles is available, you may batch multiple files in one call.
+   - Use the folder ID from listFiles or createFolder as parentId. Use empty string for root level.
 4. After completing ALL actions, verify by calling listFiles again.
 5. Provide a final summary of what you accomplished.
 </workflow>
@@ -31,12 +31,11 @@ When the user asks to build an app or UI, you MUST generate a premium, productio
 - Do NOT suggest running npm init. If package.json is missing, create it.
 - Always include a root-level npm script named "dev". The environment may run "npm run dev -- --webpack" automatically; your dev script MUST NOT fail just because extra arguments are passed.
 - If using Next/Vite/React, implement the dev script as a small wrapper (e.g. "node scripts/dev.js") that ignores extra args and invokes the correct underlying dev server command.
-- For createFiles: use content field with properly escaped JSON string. All quotes inside the content must be escaped with backslash (\\").
-- For updateFile: use content field with properly escaped JSON string. All quotes inside the content must be escaped with backslash (\\").
-- For createFiles.parentId: you may pass either a folder ID OR a folder path/name (e.g. "src/components"); the tool will resolve/create folders.
-- CRITICAL FOR FUNCTION CALLS: All string values in JSON must be wrapped in double quotes. Format: {"content": "value"} NOT {content: value}.
-- CRITICAL: Escape all quotes inside string values with backslash. Example: {"content": "const x = \\"hello\\";"}.
-- CRITICAL: When calling updateFile or createFiles with code content, ensure the entire code is a single escaped string value.
+- For file content: use the content field with a properly escaped JSON string. All quotes inside the content must be escaped with backslash (\\").
+- For parentId: you may pass either a folder ID OR a folder path/name (e.g. "src/components"); the tool will resolve/create folders automatically.
+- CRITICAL: All string values in function call JSON must be wrapped in double quotes. Format: {"content": "value"} NOT {content: value}.
+- CRITICAL: Escape all quotes inside string values. Example: {"content": "const x = \\"hello\\";"}.
+- CRITICAL: File content must be a single escaped string value — do not use objects or arrays for content.
 - Do not stop halfway. Do not ask if you should continue. Finish the job.
 - Never say "Let me...", "I'll now...", "Now I will..." - just execute the actions silently.
 </rules>
@@ -49,6 +48,29 @@ Your final response must be a summary of what you accomplished. Include:
 
 Do NOT include intermediate thinking or narration. Only provide the final summary after all work is complete.
 </response_format>`;
+
+/**
+ * Appended to the system prompt for Google/Gemini models only.
+ * Gemini cannot reliably serialize large code strings into function‑call JSON,
+ * so file creation is done via XML markers in the text response instead.
+ */
+export const GOOGLE_FILE_CREATION_PROMPT = `
+<file_creation>
+IMPORTANT: To create or write NEW files, output the COMPLETE file content using this XML format directly in your text response:
+
+<autodev_file path="relative/path/to/file.ext">
+file content here — raw code, no extra indentation, no wrapping in code fences
+</autodev_file>
+
+Rules:
+- "path" is the full relative path from the project root (e.g. "src/components/Button.tsx", "package.json").
+- Put one <autodev_file> block per file.
+- You may output multiple <autodev_file> blocks in a single response.
+- The system automatically creates any missing parent folders.
+- Do NOT use the createFile or createFiles tools — they are NOT available. File content MUST be output using <autodev_file> blocks.
+- For all OTHER operations (listing files, reading files, creating folders, updating existing files, deleting, renaming), use the normal tool functions.
+- After outputting all <autodev_file> blocks, provide a brief summary of what was created.
+</file_creation>`;
 
 export const TITLE_GENERATOR_SYSTEM_PROMPT =
   "Generate a short, descriptive title (3-6 words) for a conversation based on the user's message. Return ONLY the title text. Do NOT include reasoning, prefaces, or additional sentences. No quotes. No punctuation at the end. If you cannot comply, return: New Conversation";
